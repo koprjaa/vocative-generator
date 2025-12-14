@@ -485,15 +485,16 @@ class BatchService:
         self.logger.info(f"Starting processing for chunk {chunk_index} with {len(df_chunk)} names.")
 
         # Save DataFrame and map for use in _process_single_batch
+        # Save DataFrame and map for use in _process_single_batch
         self.df_chunk = df_chunk
-        self.name_to_idx_map = {name: i for i, name in df_chunk['Trade_Name'].items()}
+        self.name_to_idx_map = {name: i for i, name in df_chunk[FILE_CONFIG['INPUT_COLUMN_NAME']].items()}
 
         last_completed_batch_in_chunk, globally_processed_names = self.checkpoint_service.get_resume_info(chunk_index)
         if last_completed_batch_in_chunk == -1: # Chunk was already fully processed
             self.logger.info(f"Chunk {chunk_index} already fully processed. Skipping.")
             return
 
-        all_names_in_chunk = df_chunk['Trade_Name'].tolist()
+        all_names_in_chunk = df_chunk[FILE_CONFIG['INPUT_COLUMN_NAME']].tolist()
         
         # Split into batches according to adaptive size
         initial_batch_size = self.batch_size_adapter.current_size 
@@ -761,12 +762,12 @@ class BatchService:
         for res in results:
             if res.original_name in name_to_idx_map:
                 idx = name_to_idx_map[res.original_name]
-                df_chunk.loc[idx, 'Oslovení'] = res.vocative
-                df_chunk.loc[idx, 'Oslovení jméno'] = res.first_name
-                df_chunk.loc[idx, 'Oslovení příjmení'] = res.surname
+                df_chunk.loc[idx, 'Vocative'] = res.vocative
+                df_chunk.loc[idx, 'Vocative First Name'] = res.first_name
+                df_chunk.loc[idx, 'Vocative Last Name'] = res.surname
                 if res.error_message:
-                    if 'Chyba' not in df_chunk.columns: df_chunk['Chyba'] = pd.NA
-                    df_chunk.loc[idx, 'Chyba'] = res.error_message
+                    if 'Error' not in df_chunk.columns: df_chunk['Error'] = pd.NA
+                    df_chunk.loc[idx, 'Error'] = res.error_message
                 
                 new_row = df_chunk.loc[idx].copy()
                 new_results_df = pd.concat([new_results_df, pd.DataFrame([new_row])], ignore_index=True)

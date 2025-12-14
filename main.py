@@ -35,7 +35,7 @@ async def process_all_names_main_task(shutdown_handler: GracefulShutdownHandler)
         logger.error(f"Input file {input_file} not found. Exiting.")
         # Create dummy file for testing if it doesn't exist
         logger.info(f"Creating dummy input file {input_file} for testing.")
-        dummy_data = {'ID': range(1, 21), 'Trade_Name': [f'Jméno Příjmení {i}' for i in range(1, 21)]}
+        dummy_data = {'ID': range(1, 21), FILE_CONFIG['INPUT_COLUMN_NAME']: [f'Jméno Příjmení {i}' for i in range(1, 21)]}
         pd.DataFrame(dummy_data).to_csv(input_file, index=False, encoding='utf-8')
         # return # Uncomment to stop if dummy data isn't desired
 
@@ -97,7 +97,7 @@ async def process_all_names_main_task(shutdown_handler: GracefulShutdownHandler)
         if checkpoint_service.last_chunk_fully_processed_index == -1 and \
            checkpoint_service.last_batch_completed_for_current_chunk == 0:
             logger.info(f"Creating new output file {output_file} with headers.")
-            pd.DataFrame(columns=['ID', 'Trade_Name', 'Oslovení', 'Oslovení jméno', 'Oslovení příjmení', 'Chyba']).to_csv(
+            pd.DataFrame(columns=['ID', FILE_CONFIG['INPUT_COLUMN_NAME'], 'Vocative', 'Vocative First Name', 'Vocative Last Name', 'Error']).to_csv(
                 output_file, index=False, encoding='utf-8'
             )
         else:
@@ -118,8 +118,8 @@ async def process_all_names_main_task(shutdown_handler: GracefulShutdownHandler)
                     total_processed_rows += len(chunk_df) # Add to total count
                     continue
 
-                if 'Trade_Name' not in chunk_df.columns:
-                    logger.error(f"Chunk {current_chunk_index} does not contain 'Trade_Name' column. Skipping.")
+                if FILE_CONFIG['INPUT_COLUMN_NAME'] not in chunk_df.columns:
+                    logger.error(f"Chunk {current_chunk_index} does not contain '{FILE_CONFIG['INPUT_COLUMN_NAME']}' column. Skipping.")
                     continue
                 if 'ID' not in chunk_df.columns:
                     logger.warning(f"Chunk {current_chunk_index} does not contain 'ID' column. Generating sequential IDs for this chunk.")
@@ -128,23 +128,23 @@ async def process_all_names_main_task(shutdown_handler: GracefulShutdownHandler)
 
                 # Clean chunk data
                 original_count_in_chunk = len(chunk_df)
-                chunk_df.dropna(subset=['Trade_Name'], inplace=True)
-                chunk_df['Trade_Name'] = chunk_df['Trade_Name'].astype(str).str.strip() # Ensure string and strip whitespace
-                chunk_df = chunk_df[chunk_df['Trade_Name'] != ''] # Remove empty Trade_Name
-                # Handle duplicates carefully if ID is important. Here duplicates in Trade_Name are kept
+                chunk_df.dropna(subset=[FILE_CONFIG['INPUT_COLUMN_NAME']], inplace=True)
+                chunk_df[FILE_CONFIG['INPUT_COLUMN_NAME']] = chunk_df[FILE_CONFIG['INPUT_COLUMN_NAME']].astype(str).str.strip() # Ensure string and strip whitespace
+                chunk_df = chunk_df[chunk_df[FILE_CONFIG['INPUT_COLUMN_NAME']] != ''] # Remove empty Name
+                # Handle duplicates carefully if ID is important. Here duplicates in Name are kept
                 # as they might have different IDs. 
-                # chunk_df.drop_duplicates(subset=['Trade_Name'], keep='first', inplace=True)
+                # chunk_df.drop_duplicates(subset=[FILE_CONFIG['INPUT_COLUMN_NAME']], keep='first', inplace=True)
                 
                 cleaned_count_in_chunk = len(chunk_df)
                 if original_count_in_chunk != cleaned_count_in_chunk:
-                    logger.info(f"Cleaned chunk {current_chunk_index}: removed {original_count_in_chunk - cleaned_count_in_chunk} empty/NaN 'Trade_Name's.")
+                    logger.info(f"Cleaned chunk {current_chunk_index}: removed {original_count_in_chunk - cleaned_count_in_chunk} empty/NaN '{FILE_CONFIG['INPUT_COLUMN_NAME']}'s.")
 
                 if cleaned_count_in_chunk == 0:
                     logger.info(f"Chunk {current_chunk_index} is empty after cleaning. Skipping.")
                     continue
                 
                 # Initialize output columns
-                for col in ['Oslovení', 'Oslovení jméno', 'Oslovení příjmení', 'Chyba']:
+                for col in ['Vocative', 'Vocative First Name', 'Vocative Last Name', 'Error']:
                     if col not in chunk_df.columns: chunk_df[col] = pd.NA
 
                 await batch_service.process_chunk_data(chunk_df, current_chunk_index)
@@ -160,9 +160,9 @@ async def process_all_names_main_task(shutdown_handler: GracefulShutdownHandler)
                 total_processed_rows += len(chunk_df)
                 
                 # Chunk statistics
-                success_condition = (chunk_df['Oslovení'].notna()) & \
-                                    (chunk_df['Oslovení'] != '') & \
-                                    (chunk_df['Oslovení'].str.lower() != chunk_df['Trade_Name'].str.lower())
+                success_condition = (chunk_df['Vocative'].notna()) & \
+                                    (chunk_df['Vocative'] != '') & \
+                                    (chunk_df['Vocative'].str.lower() != chunk_df[FILE_CONFIG['INPUT_COLUMN_NAME']].str.lower())
                 actual_success_count = success_condition.sum()
                 logger.info(f"--- Chunk {current_chunk_index} Finished ---")
                 logger.info(f"- Processed in chunk: {len(chunk_df):,} records")

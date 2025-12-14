@@ -89,7 +89,8 @@ API_CONFIG = {
 }
 
 FILE_CONFIG = {
-    'INPUT_FILE': 'jmena.csv',
-    'OUTPUT_FILE': 'jmena_s_oslovenim.csv',
-    'CHECKPOINT_FILE': 'checkpoint.json'
+    'INPUT_FILE': 'names.csv',
+    'OUTPUT_FILE': 'names_with_vocative.csv',
+    'CHECKPOINT_FILE': 'checkpoint.json',
+    'INPUT_COLUMN_NAME': 'Name'
 }
