@@ -1,4 +1,4 @@
-# Overview
+# About
 This project is an asynchronous high-performance batch processor for generating Czech vocatives (5th grammatical case) from proper names. It utilizes an external third-party API to process large datasets of names, enabling automated localization of salutations in communications.
 
 # Motivation
