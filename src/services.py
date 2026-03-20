@@ -114,12 +114,10 @@ class CheckpointService:
         return 0, self.processed_names
 
 
-    def is_name_globally_processed(self, name: str) -> bool:
-        return name in self.processed_names
-
     def get_globally_processed_name_data(self, name: str) -> Optional[Dict[str,str]]:
         return self.processed_names.get(name)
 
+    # possibly external dependency — verify before removing
     def clear_checkpoint_for_new_run(self) -> None:
         try:
             if self.checkpoint_file.exists():
@@ -138,7 +136,6 @@ class NameService:
         self.user_agent_manager = user_agent_manager
         self.base_url = API_CONFIG['BASE_URL']
         self.endpoint = API_CONFIG['ENDPOINT']
-        self.timeout_val = aiohttp.ClientTimeout(total=HTTP_CONFIG['TIMEOUT'])
         self.max_retries = HTTP_CONFIG['MAX_RETRIES']
         self.logger = logging.getLogger(self.__class__.__name__)
 
@@ -146,7 +143,6 @@ class NameService:
         self.global_backoff_factor = 1.0
         self.consecutive_successes_since_last_error = 0
         self.last_backoff_factor_increase_time = 0.0
-        self.last_error_time = 0.0
         self.total_requests = 0
         self.total_errors = 0
 
@@ -168,7 +164,6 @@ class NameService:
 
     async def _handle_rate_limit_or_server_error_delay(self, error_type: str, attempt: int) -> None:
         current_time = time.time()
-        self.last_error_time = current_time
         self.consecutive_successes_since_last_error = 0
         self.total_errors += 1
 
@@ -402,7 +397,6 @@ class BatchService:
 
         self.current_batch_successes = 0
         self.current_batch_errors = 0
-        self.last_adaptation_time = time.time()
 
         self.checkpoint_interval = HTTP_CONFIG.get('CHECKPOINT_INTERVAL', 5)
         self.batches_since_last_checkpoint = 0
@@ -452,7 +446,7 @@ class BatchService:
         self.df_chunk = df_chunk
         self.name_to_idx_map = {name: i for i, name in df_chunk[FILE_CONFIG['INPUT_COLUMN_NAME']].items()}
 
-        last_completed_batch_in_chunk, globally_processed_names = self.checkpoint_service.get_resume_info(chunk_index)
+        last_completed_batch_in_chunk = self.checkpoint_service.get_resume_info(chunk_index)[0]
         if last_completed_batch_in_chunk == -1:
             self.logger.info(f"Chunk {chunk_index} already fully processed. Skipping.")
             return
