@@ -7,7 +7,7 @@ The program reads names from a CSV, submits each name to the public Czech declen
 
 ## Why it was built
 
-LICENSE and source files do not state author motivation. The code only automates Czech vocative forms via sklonuj.cz for CSV-sized inputs, which implies batch text or salutation preparation but is not elaborated further in the repository.
+The motivation is to support cleaning personal data held in a database: the tool batch-generates Czech vocatives for names so large extracts or update batches do not require hand-declining every row.
 
 ## Architecture
 
