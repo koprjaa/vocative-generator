@@ -12,7 +12,6 @@ import os
 import random
 import time
 import asyncio
-import gc  # Added gc import
 import pandas as pd
 import aiohttp
 from pathlib import Path
@@ -321,9 +320,9 @@ class NameService:
         """Extracts vocative from HTML response with improved logging."""
         try:
             soup = BeautifulSoup(html, 'html.parser')
-            table = soup.find('table', class_='table table-hover table-striped table-bordered')
-            if not table:
-                table = soup.find('table', class_='table')
+            # Try specific class first, then fallback to generic table
+            table = (soup.find('table', class_='table table-hover table-striped table-bordered') or
+                     soup.find('table', class_='table'))
             
             if not table:
                 self.logger.warning(
@@ -331,32 +330,25 @@ class NameService:
                 )
                 return ""
             
-            rows = table.find_all('tr')
+            rows = table.find_all('tr', limit=10)  # Limit search to first 10 rows
             if len(rows) <= 1:
                 self.logger.warning(
-                    f"No data rows found for '{original_name}'. Table HTML:\n{table.prettify()}"
+                    f"No data rows found for '{original_name}'. Table HTML:\n{table.prettify()[:500]}"
                 )
                 return ""
             
+            original_lower = original_name.lower()
             for row in rows[1:]:
-                cells = row.find_all('td')
+                cells = row.find_all('td', limit=2)
                 if len(cells) >= 2:
-                    input_name = cells[0].text.strip()
                     vocative_candidate = cells[1].text.strip()
                     
                     self.logger.debug(
-                        f"Extracted for '{original_name}': "
-                        f"input='{input_name}', vocative='{vocative_candidate}'"
+                        f"Extracted for '{original_name}': vocative='{vocative_candidate}'"
                     )
                     
-                    # Check if vocative differs from original
-                    if vocative_candidate.lower() != original_name.lower():
-                        return vocative_candidate
-                    else:
-                        self.logger.info(
-                            f"Vocative same as original for '{original_name}': '{vocative_candidate}'"
-                        )
-                        return vocative_candidate
+                    # Return vocative (even if same as original, API returned it)
+                    return vocative_candidate
             
             self.logger.warning(
                 f"No matching row found for '{original_name}' in results table. "
@@ -499,12 +491,11 @@ class BatchService:
         # Split into batches according to adaptive size
         initial_batch_size = self.batch_size_adapter.current_size 
         
-        # Batch generator
-        def chunk_list(data: list, size: int):
-            for i in range(0, len(data), size):
-                yield data[i:i + size]
-
-        batches_of_names = list(chunk_list(all_names_in_chunk, initial_batch_size))
+        # Split into batches efficiently
+        batches_of_names = [
+            all_names_in_chunk[i:i + initial_batch_size]
+            for i in range(0, len(all_names_in_chunk), initial_batch_size)
+        ]
         total_batches_in_chunk = len(batches_of_names)
         self.logger.info(f"Chunk {chunk_index} split into {total_batches_in_chunk} batches of (up to) {initial_batch_size} names.")
 
@@ -757,29 +748,41 @@ class BatchService:
 
     def _update_dataframe_with_results(self, df_chunk: pd.DataFrame, results: List[NameResult], name_to_idx_map: Dict):
         """Updates DataFrame chunk with results."""
-        new_results_df = pd.DataFrame(columns=df_chunk.columns)
+        if not results:
+            return
+            
+        # Prepare data for batch update
+        update_data = {
+            'Vocative': [],
+            'Vocative First Name': [],
+            'Vocative Last Name': [],
+            'Error': [],
+            'indices': []
+        }
         
         for res in results:
             if res.original_name in name_to_idx_map:
                 idx = name_to_idx_map[res.original_name]
-                df_chunk.loc[idx, 'Vocative'] = res.vocative
-                df_chunk.loc[idx, 'Vocative First Name'] = res.first_name
-                df_chunk.loc[idx, 'Vocative Last Name'] = res.surname
-                if res.error_message:
-                    if 'Error' not in df_chunk.columns: df_chunk['Error'] = pd.NA
-                    df_chunk.loc[idx, 'Error'] = res.error_message
-                
-                new_row = df_chunk.loc[idx].copy()
-                new_results_df = pd.concat([new_results_df, pd.DataFrame([new_row])], ignore_index=True)
+                update_data['indices'].append(idx)
+                update_data['Vocative'].append(res.vocative)
+                update_data['Vocative First Name'].append(res.first_name)
+                update_data['Vocative Last Name'].append(res.surname)
+                update_data['Error'].append(res.error_message if res.error_message else pd.NA)
             else:
                 self.logger.warning(f"Name '{res.original_name}' from results not found in current DataFrame chunk for update.")
         
-        if not new_results_df.empty:
-            try:
-                new_results_df.to_csv(FILE_CONFIG['OUTPUT_FILE'], mode='a', header=False, index=False, encoding='utf-8')
-                self.logger.debug(f"Updated CSV file with {len(new_results_df)} new results")
-            except Exception as e:
-                self.logger.error(f"Error saving to CSV file: {e}", exc_info=True)
+        if not update_data['indices']:
+            return
+            
+        # Batch update DataFrame
+        indices = update_data['indices']
+        df_chunk.loc[indices, 'Vocative'] = update_data['Vocative']
+        df_chunk.loc[indices, 'Vocative First Name'] = update_data['Vocative First Name']
+        df_chunk.loc[indices, 'Vocative Last Name'] = update_data['Vocative Last Name']
+        
+        if 'Error' not in df_chunk.columns:
+            df_chunk['Error'] = pd.NA
+        df_chunk.loc[indices, 'Error'] = update_data['Error']
     
     def _log_batch_progress(self, completed_in_chunk: int, total_in_chunk: int, chunk_idx:int, chunk_start_time: float):
         progress = (completed_in_chunk / total_in_chunk) * 100 if total_in_chunk > 0 else 0

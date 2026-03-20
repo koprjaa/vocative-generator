@@ -6,7 +6,7 @@ Description: Configuration constants for logging, HTTP requests, API endpoints, 
 Author: Jan Alexandr Kopřiva jan.alexandr.kopriva@gmail.com
 License: MIT
 """
-from typing import List, Dict
+from typing import List
 
 # --- CONFIGURATION CONSTANTS ---
 LOGGING_CONFIG = {

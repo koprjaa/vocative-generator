@@ -11,7 +11,6 @@ import logging
 import logging.config
 import time
 import signal
-import gc
 import pandas as pd
 from pathlib import Path
 
@@ -83,14 +82,14 @@ async def process_all_names_main_task(shutdown_handler: GracefulShutdownHandler)
         total_processed_rows = 0
         current_chunk_index = -1 # Start with -1, first chunk will be 0
 
-        # Determine total rows (can be slow for very large files)
+        # Determine total rows efficiently
         try:
-            with open(input_file, 'r', encoding='utf-8') as f_count:
-                total_rows_in_file = sum(1 for _ in f_count) -1 # -1 for header
+            # Count rows without loading full file
+            total_rows_in_file = sum(1 for _ in pd.read_csv(input_file, chunksize=10000, usecols=[0])) - 1
             logger.info(f"Total records to process in {input_file}: {total_rows_in_file:,}")
         except Exception as e:
             logger.warning(f"Could not determine total rows in input file: {e}")
-            total_rows_in_file = -1 # Unknown count
+            total_rows_in_file = -1
 
         # Create/overwrite output file with header if not resuming or first chunk
         # Or if checkpoint says we are at the beginning
@@ -128,16 +127,17 @@ async def process_all_names_main_task(shutdown_handler: GracefulShutdownHandler)
 
                 # Clean chunk data
                 original_count_in_chunk = len(chunk_df)
-                chunk_df.dropna(subset=[FILE_CONFIG['INPUT_COLUMN_NAME']], inplace=True)
-                chunk_df[FILE_CONFIG['INPUT_COLUMN_NAME']] = chunk_df[FILE_CONFIG['INPUT_COLUMN_NAME']].astype(str).str.strip() # Ensure string and strip whitespace
-                chunk_df = chunk_df[chunk_df[FILE_CONFIG['INPUT_COLUMN_NAME']] != ''] # Remove empty Name
-                # Handle duplicates carefully if ID is important. Here duplicates in Name are kept
-                # as they might have different IDs. 
-                # chunk_df.drop_duplicates(subset=[FILE_CONFIG['INPUT_COLUMN_NAME']], keep='first', inplace=True)
+                name_col = FILE_CONFIG['INPUT_COLUMN_NAME']
+                
+                # Remove NaN values and convert to string
+                chunk_df = chunk_df.dropna(subset=[name_col]).copy()
+                chunk_df[name_col] = chunk_df[name_col].astype(str).str.strip()
+                # Remove empty strings
+                chunk_df = chunk_df[chunk_df[name_col] != '']
                 
                 cleaned_count_in_chunk = len(chunk_df)
                 if original_count_in_chunk != cleaned_count_in_chunk:
-                    logger.info(f"Cleaned chunk {current_chunk_index}: removed {original_count_in_chunk - cleaned_count_in_chunk} empty/NaN '{FILE_CONFIG['INPUT_COLUMN_NAME']}'s.")
+                    logger.info(f"Cleaned chunk {current_chunk_index}: removed {original_count_in_chunk - cleaned_count_in_chunk} empty/NaN '{name_col}'s.")
 
                 if cleaned_count_in_chunk == 0:
                     logger.info(f"Chunk {current_chunk_index} is empty after cleaning. Skipping.")
@@ -173,9 +173,7 @@ async def process_all_names_main_task(shutdown_handler: GracefulShutdownHandler)
                 else:
                     logger.info(f"- Overall processed: {total_processed_rows:,} records")
 
-                del chunk_df
-                gc.collect()
-                logger.debug("Garbage collection after chunk processing.")
+                # DataFrame will be garbage collected automatically
 
         except asyncio.CancelledError:
             logger.warning("Main processing task was cancelled. Saving checkpoint if possible...")
@@ -205,10 +203,11 @@ async def main_wrapper():
     try:
         logger.info("Starting main_wrapper...")
         main_task = asyncio.create_task(process_all_names_main_task(shutdown_handler))
+        shutdown_task = asyncio.create_task(shutdown_handler.shutdown_event.wait())
         
         # Wait for main task completion OR shutdown signal
         done, pending = await asyncio.wait(
-            [main_task, shutdown_handler.shutdown_event.wait()],
+            [main_task, shutdown_task],
             return_when=asyncio.FIRST_COMPLETED
         )
 

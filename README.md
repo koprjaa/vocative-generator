@@ -57,12 +57,20 @@ The project follows a modular architecture within the `src/` package:
 
 ## 9. How to Run
 
-1. Install dependencies:
+1. Create and activate virtual environment (recommended):
+   ```bash
+   python3 -m venv venv
+   source venv/bin/activate  # On Windows: venv\Scripts\activate
+   ```
+
+2. Install dependencies:
    ```bash
    pip install -r requirements.txt
    ```
-2. Place your input data in `names.csv` (or configure via `src/config.py`).
-3. Run the application:
+
+3. Place your input data in `names.csv` (or configure via `src/config.py`).
+
+4. Run the application:
    ```bash
    python main.py
    ```
