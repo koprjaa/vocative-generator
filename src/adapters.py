@@ -1,11 +1,17 @@
+# Project: Vocative Generator
+# File:    src/adapters.py
+#
+# Description:
+# Adjusts sleep delay, concurrent worker ceiling, and batch size from rolling success/error ratios to stay under remote limits.
+#
+# Author:
+# Jan Alexandr Kopřiva
+# jan.alexandr.kopriva@gmail.com
+#
+# Created: 2025-12-14
+#
+# License: MIT
 
-"""
-Project: Vocative Generator
-File: src/adapters.py
-Description: Adaptive components for dynamically adjusting delays, worker counts, and batch sizes based on performance.
-Author: Jan Alexandr Kopřiva jan.alexandr.kopriva@gmail.com
-License: MIT
-"""
 import time
 import logging
 import random
@@ -13,13 +19,12 @@ import asyncio
 from typing import List
 from .config import HTTP_CONFIG
 
-# --- CORE ADAPTERS ---
 class AdaptiveDelay:
     def __init__(self, initial_delay: float, max_delay: float, min_delay: float):
         self.current_delay = initial_delay
         self.max_delay = max_delay
         self.min_delay = min_delay
-        self.adjustment_interval = HTTP_CONFIG.get('WORKER_SCALE_INTERVAL', 1.0) # Use config value, longer interval
+        self.adjustment_interval = HTTP_CONFIG.get('WORKER_SCALE_INTERVAL', 1.0)
         self.last_adjustment = time.time()
         self.logger = logging.getLogger(self.__class__.__name__)
 
@@ -49,7 +54,7 @@ class AdaptiveWorkers:
         self.current_workers = initial_workers
         self.max_workers = max_workers
         self.min_workers = min_workers
-        self.success_count = 0 # Track successes/failures per interval
+        self.success_count = 0
         self.error_count = 0
         self.adjustment_interval = HTTP_CONFIG.get('WORKER_SCALE_INTERVAL', 3.0)
         self.last_adjustment = time.time()
@@ -62,14 +67,14 @@ class AdaptiveWorkers:
         if time.time() - self.last_adjustment >= self.adjustment_interval:
             old_workers = self.current_workers
             total_ops = self.success_count + self.error_count
-            if total_ops == 0: return # No activity
+            if total_ops == 0: return
 
             success_rate = self.success_count / total_ops
-            
-            if success_rate > 0.9 and self.current_workers < self.max_workers : # High success rate
-                self.current_workers = min(self.max_workers, self.current_workers + max(1, int(self.current_workers * 0.1))) # Increase by 10% or at least 1
-            elif success_rate < 0.8 and self.current_workers > self.min_workers: # Low success rate
-                self.current_workers = max(self.min_workers, self.current_workers - max(1, int(self.current_workers * 0.2))) # Decrease by 20% or at least 1
+
+            if success_rate > 0.9 and self.current_workers < self.max_workers :
+                self.current_workers = min(self.max_workers, self.current_workers + max(1, int(self.current_workers * 0.1)))
+            elif success_rate < 0.8 and self.current_workers > self.min_workers:
+                self.current_workers = max(self.min_workers, self.current_workers - max(1, int(self.current_workers * 0.2)))
             
             if old_workers != self.current_workers:
                  self.logger.info(f"Workers adjusted: {old_workers} -> {self.current_workers} (S/E: {self.success_count}/{self.error_count}, Rate: {success_rate:.1%})")
@@ -78,7 +83,7 @@ class AdaptiveWorkers:
             self.error_count = 0
             self.last_adjustment = time.time()
 
-class AdaptiveBatchSize: # Similar to AdaptiveWorkers
+class AdaptiveBatchSize:
     def __init__(self, initial_size: int, max_size: int, min_size: int):
         self.current_size = initial_size
         self.max_size = max_size

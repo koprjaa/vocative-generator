@@ -1,107 +1,41 @@
 # Vocative Generator
+![](https://img.shields.io/badge/License-MIT-blue?style=flat-square) ![](https://img.shields.io/static/v1?label=Python&color=lightgrey&style=flat-square&logo=python&logoColor=black) ![](https://img.shields.io/badge/aiohttp-3.9.3-lightgrey?style=flat-square) ![](https://img.shields.io/badge/pandas-2.2.0-lightgrey?style=flat-square)
 
-## 1. Overview
+## What it does
 
-This tool generates Czech vocatives (5th grammatical case) from proper names in large datasets. It uses an external third-party API to process names asynchronously, enabling automated localization of salutations in communications.
+The program reads names from a CSV, submits each name to the public Czech declension site sklonuj.cz by automating its HTML form (GET for session cookies, then POST with field `inpJmena`), parses the vocative from the returned HTML table, and writes columns for vocative text and split first or last fragments to an output CSV. It processes input in large pandas chunks, overlaps many names in flight via asyncio tasks, persists progress in `checkpoint.json`, and can resume after interruption. If the configured input file is missing, `main.py` generates a small dummy `names.csv` so the pipeline still runs.
 
-## 2. Motivation
+## Why it was built
 
-Correct declension of names is essential for professional communication in the Czech language. Manual declension for large contact lists is impractical. This tool automates the process with a focus on reliability, throughput, and respecting remote server constraints through adaptive rate limiting.
+LICENSE and source files do not state author motivation. The code only automates Czech vocative forms via sklonuj.cz for CSV-sized inputs, which implies batch text or salutation preparation but is not elaborated further in the repository.
 
-## 3. What This Project Does
+## Architecture
 
-- Ingests CSV files with a `Name` column containing proper names.
-- Sends asynchronous HTTP requests to an external web service (`sklonuj.cz`).
-- Scrapes vocative forms from HTML responses.
-- Saves results incrementally to output CSV files.
-- Handles network instability, rate limits, and server errors automatically.
-- Implements checkpointing to resume interrupted processing.
+`main.py` drives the loop: it counts or estimates input rows, optionally creates an empty output CSV with headers, reads the input in chunks of `CHUNK_SIZE` from `src/config.py`, cleans rows, and delegates each chunk to `BatchService`. `BatchService` splits the chunk into batches sized by `AdaptiveBatchSize`, skips work already present in `CheckpointService`, schedules `NameService.process_single_name` under a cap from `AdaptiveWorkers`, merges results back into the chunk DataFrame, and calls `CheckpointService.save_checkpoint` on an interval and when a chunk finishes. `NameService` holds per-name retry and backoff state and uses BeautifulSoup with fixed table class selectors to extract the vocative cell. `AdaptiveDelay`, `AdaptiveWorkers`, and `AdaptiveBatchSize` in `src/adapters.py` adjust delay, concurrency, and batch size from batch-level success rates. `GracefulShutdownHandler` and `create_aiohttp_session` in `src/utils.py` register SIGINT or SIGTERM handling and supply a shared `aiohttp.ClientSession`. `NameResult` in `src/models.py` carries parsed fields and a `success` flag based on whether the returned string differs from the input (case-insensitive).
 
-## 4. Architecture
+## Key decisions
 
-The project follows a modular architecture within the `src/` package:
+- Async I/O with aiohttp suits many sequential HTTP round-trips to one host rather than a synchronous loop.
+- Chunked pandas reads bound memory for large CSVs while `CheckpointService` stores a growing JSON map of all processed names for resume, trading disk and serialization cost for global deduplication across chunks.
+- Two layers of backoff appear in the design: `NameService` scales waits on 429, 5xx, and connection errors, while adapters tune delay, workers, and batch size from success ratios.
+- User-Agent strings are rotated from a list in config and set per request because the session skips aiohttp’s default User-Agent header.
+- The aiohttp connector sets `ssl=False` even though `API_CONFIG` uses an `https` base URL.
 
-- **Service Layer** (`src/services.py`): Core business logic. `NameService` handles single-name processing; `BatchService` manages concurrency; `CheckpointService` handles persistency.
-- **Adaptive Layer** (`src/adapters.py`): Implements feedback loops to dynamically adjust request delays, concurrency levels, and batch sizes based on success rates.
-- **Data Models** (`src/models.py`): Uses Python Dataclasses for type-safe data passing.
-- **Configuration** (`src/config.py`): Centralized configuration for easy tuning.
-- **Utilities** (`src/utils.py`): Graceful shutdown handling and HTTP session management.
+## Trade-offs
 
-## 5. Tech Stack
+- Checkpoint JSON retains every processed name in one object, which simplifies resume and reuse across batches but grows with the dataset size and rewrite cost.
+- HTML scraping depends on sklonuj.cz markup; a stable API contract was not used.
+- Concurrency is tuned with several magic thresholds in adapters (for example 0.95 and 0.8 success rates) without external calibration documented in the repo.
+- `MEMORY_LIMIT` exists in `HTTP_CONFIG` but is not referenced elsewhere in the codebase.
 
-- **Language**: Python 3.x
-- **Concurrency**: `asyncio`, `aiohttp` for non-blocking I/O.
-- **Data Processing**: `pandas` for efficient CSV handling and chunking.
-- **Parsing**: `BeautifulSoup4` for HTML extraction.
+## Limitations
 
-## 6. Data Sources
+- There is no test directory or test files in the repository.
+- Behavior is coupled to sklonuj.cz availability, rate limiting, and unchanged form URLs and HTML table structure.
+- After a chunk completes, `BatchService` advances `last_chunk_fully_processed_index` to that chunk index; `main.py` then evaluates whether to append the chunk to the output CSV using `last_chunk_fully_processed_index >= current_chunk_index`, which suppresses the append when shutdown has not been requested, so successful runs may leave `names_with_vocative.csv` with only headers unless that condition is not hit.
+- Dummy input creation on missing `names.csv` makes dry runs easy but can overwrite expectations if a run starts without the intended file.
+- Python version is not pinned; dependencies are pinned in `requirements.txt` to specific package versions.
 
-- **Input**: CSV file (`names.csv`) containing raw names (configurable via `src/config.py`).
-- **Processing**: `https://sklonuj.cz` (External Web Service).
-- **Output**: CSV file (`names_with_vocative.csv`) with original names and their vocatives.
+## How to run
 
-## 7. Key Design Decisions
-
-1. **Adaptive Rate Limiting**: Instead of hard-coded limits, the system monitors response codes (429/500) and response times to dynamically adjust the number of concurrent workers and delay between requests. This maximizes throughput while avoiding IP bans.
-2. **Checkpointing**: Processing state is saved to `checkpoint.json` after every N batches. This allows the application to resume interrupted jobs without re-processing successful records.
-3. **Asynchronous I/O**: Used to handle high-latency network operations efficiently, significantly outperforming synchronous equivalents.
-4. **Chunk Processing**: Input files are processed in chunks using `pandas` to maintain constant memory usage regardless of input file size.
-5. **Global Backoff Strategy**: Implements exponential backoff with jitter for rate limit and server errors, with automatic recovery when conditions improve.
-
-## 8. Limitations
-
-- **External Dependency**: The application functionality is strictly coupled to the availability and interface of `sklonuj.cz`.
-- **Network Reliability**: Performance heavily depends on network latency and the remote server's capacity.
-- **Single-Threaded CPU Logic**: While I/O is concurrent, data parsing runs on the main event loop (sufficient for this use case but a theoretical bottleneck).
-- **Hardcoded Paths**: File paths are hardcoded in `src/config.py` (can be overridden by modifying the configuration).
-
-## 9. How to Run
-
-1. Create and activate virtual environment (recommended):
-   ```bash
-   python3 -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
-   ```
-
-2. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-3. Place your input data in `names.csv` (or configure via `src/config.py`).
-
-4. Run the application:
-   ```bash
-   python main.py
-   ```
-
-## 10. Example Usage
-
-Input (`names.csv`):
-```csv
-ID,Name
-1,Jan Novák
-2,Petr Svoboda
-```
-
-Output (`names_with_vocative.csv`):
-```csv
-ID,Name,Vocative,Vocative First Name,Vocative Last Name,Error
-1,Jan Novák,Jane Nováku,Jane,Nováku,
-2,Petr Svoboda,Petře Svobodo,Petře,Svobodo,
-```
-
-## 11. Future Improvements
-
-- **Offline Model**: Implement a local NLP model or rule-based engine to remove the dependency on the external API.
-- **Proxy Rotation**: Integrate proxy support to scale beyond the rate limits of a single IP address.
-- **CLI Arguments**: Replace static configuration with command-line arguments (e.g., `--input`, `--output`, `--workers`).
-
-## 12. Author
-
-Jan Alexandr Kopřiva  
-jan.alexandr.kopriva@gmail.com
-
-## 13. License
-
-MIT
+Create a virtual environment, install dependencies with `pip install -r requirements.txt`, supply a CSV whose configured name column exists (`INPUT_COLUMN_NAME` in `src/config.py`, default `Name`), and use `FILE_CONFIG` paths (default `names.csv` input and `names_with_vocative.csv` output). If `ID` is absent, `main.py` synthesizes sequential IDs per chunk. Run `python main.py`. Logging uses `LOGGING_CONFIG` (console handler).

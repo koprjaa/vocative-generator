@@ -1,11 +1,17 @@
+# Project: Vocative Generator
+# File:    main.py
+#
+# Description:
+# Orchestrates chunked CSV ingestion, adaptive batch processing, checkpoint persistence, and graceful shutdown for bulk vocative generation.
+#
+# Author:
+# Jan Alexandr Kopřiva
+# jan.alexandr.kopriva@gmail.com
+#
+# Created: 2025-11-01
+#
+# License: MIT
 
-"""
-Project: Vocative Generator
-File: main.py
-Description: Entry point for the application that sets up configuration and executes the main processing pipeline.
-Author: Jan Alexandr Kopřiva jan.alexandr.kopriva@gmail.com
-License: MIT
-"""
 import asyncio
 import logging
 import logging.config

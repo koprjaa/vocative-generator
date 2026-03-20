@@ -1,11 +1,17 @@
+# Project: Vocative Generator
+# File:    src/models.py
+#
+# Description:
+# Defines NameResult, the typed record of a single name's vocative form, optional split name parts, success flag, and errors.
+#
+# Author:
+# Jan Alexandr Kopřiva
+# jan.alexandr.kopriva@gmail.com
+#
+# Created: 2025-12-14
+#
+# License: MIT
 
-"""
-Project: Vocative Generator
-File: src/models.py
-Description: Data models defining successful and failed name processing results.
-Author: Jan Alexandr Kopřiva jan.alexandr.kopriva@gmail.com
-License: MIT
-"""
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
@@ -21,11 +27,11 @@ class NameResult:
     @classmethod
     def from_vocative(cls, original_name: str, vocative: str) -> 'NameResult':
         first_name, surname = cls.split_vocative(vocative)
-        # Success if vocative differs from original and is not empty
+        # Empty or unchanged surface form counts as failure for downstream metrics.
         success = bool(vocative and vocative.strip().lower() != original_name.strip().lower())
         return cls(
             original_name=original_name,
-            vocative=vocative.strip() if vocative else original_name, # Ensure vocative is not None
+            vocative=vocative.strip() if vocative else original_name,
             first_name=first_name,
             surname=surname,
             success=success
@@ -35,7 +41,7 @@ class NameResult:
     def error(cls, original_name: str, error_message: str) -> 'NameResult':
         return cls(
             original_name=original_name,
-            vocative=original_name, # Return original on error
+            vocative=original_name,
             first_name='',
             surname='',
             success=False,
@@ -47,7 +53,7 @@ class NameResult:
         if not vocative:
             return "", ""
         parts = vocative.strip().split()
-        if not parts: # If vocative is just whitespace
+        if not parts:
             return "", ""
         if len(parts) <= 1:
             return parts[0], ""

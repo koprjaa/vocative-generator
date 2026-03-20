@@ -1,11 +1,17 @@
+# Project: Vocative Generator
+# File:    src/utils.py
+#
+# Description:
+# Implements SIGINT/SIGTERM-driven shutdown coordination and builds the aiohttp ClientSession used for sklonuj.cz requests.
+#
+# Author:
+# Jan Alexandr Kopřiva
+# jan.alexandr.kopriva@gmail.com
+#
+# Created: 2025-12-14
+#
+# License: MIT
 
-"""
-Project: Vocative Generator
-File: src/utils.py
-Description: Utility functions for graceful shutdown handling and aiohttp session management.
-Author: Jan Alexandr Kopřiva jan.alexandr.kopriva@gmail.com
-License: MIT
-"""
 import signal
 import asyncio
 import logging
@@ -30,19 +36,18 @@ class GracefulShutdownHandler:
 
 @asynccontextmanager
 async def create_aiohttp_session():
-    # Increased connector limit if MAX_WORKERS is high
-    # Limit per host is also important if all requests go to the same server
+    # Pool sized for peak concurrency; traffic is single-host so per-host cap matches worker cap.
     connector = TCPConnector(
-        ssl=False, # If server doesn't have valid SSL, otherwise True or omit
-        limit=HTTP_CONFIG['MAX_WORKERS'] * 2, # More connections for flexibility
-        limit_per_host=HTTP_CONFIG['MAX_WORKERS'] # Limit per host
+        ssl=False,
+        limit=HTTP_CONFIG['MAX_WORKERS'] * 2,
+        limit_per_host=HTTP_CONFIG['MAX_WORKERS']
     )
-    # Timeout is already in NameService, this is global for session
-    timeout_config = ClientTimeout(total=HTTP_CONFIG['TIMEOUT'] + 5) # Slightly higher than per-request timeout
-    
+    # Session-level ceiling slightly above NameService per-request timeout to avoid races on slow responses.
+    timeout_config = ClientTimeout(total=HTTP_CONFIG['TIMEOUT'] + 5)
+
     async with aiohttp.ClientSession(
         connector=connector,
         timeout=timeout_config,
-        skip_auto_headers=['User-Agent'] # Manual User-Agent management
+        skip_auto_headers=['User-Agent']
     ) as session:
         yield session
