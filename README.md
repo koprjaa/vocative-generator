@@ -1,5 +1,5 @@
 # Vocative Generator
-![](https://img.shields.io/badge/License-MIT-blue?style=flat-square) ![](https://img.shields.io/static/v1?label=Python&color=lightgrey&style=flat-square&logo=python&logoColor=black) ![](https://img.shields.io/badge/aiohttp-3.9.3-lightgrey?style=flat-square) ![](https://img.shields.io/badge/pandas-2.2.0-lightgrey?style=flat-square)
+![](https://img.shields.io/badge/License-MIT-blue?style=flat-square) ![](https://img.shields.io/badge/Python--lightgrey?style=flat-square&logo=python&logoColor=3776AB) ![](https://img.shields.io/badge/aiohttp-3.9.3-lightgrey?style=flat-square) ![](https://img.shields.io/badge/pandas-2.2.0-lightgrey?style=flat-square)
 
 ## What it does
 
