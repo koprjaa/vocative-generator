@@ -264,7 +264,13 @@ async def main_wrapper():
 
     loop = asyncio.get_event_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, shutdown_handler.handle_signal, sig, None)
+        try:
+            loop.add_signal_handler(sig, shutdown_handler.handle_signal, sig, None)
+        except NotImplementedError:
+            # Windows: add_signal_handler is not supported on ProactorEventLoop.
+            # Fall back to signal.signal() for SIGINT; SIGTERM is not delivered on Windows.
+            if sig == signal.SIGINT:
+                signal.signal(sig, lambda s, f: shutdown_handler.handle_signal(s, f))
 
     main_task = None
     try:
