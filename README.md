@@ -1,41 +1,57 @@
-# Vocative Generator
-![](https://img.shields.io/badge/License-MIT-blue?style=flat-square) ![](https://img.shields.io/badge/Python--lightgrey?style=flat-square&logo=python&logoColor=3776AB) ![](https://img.shields.io/badge/aiohttp-3.9.3-lightgrey?style=flat-square) ![](https://img.shields.io/badge/pandas-2.2.0-lightgrey?style=flat-square)
+# vocative-generator
 
-## What it does
+**Batch-declines Czech first names into the vocative case by automating sklonuj.cz — async aiohttp, pandas chunks, resumable checkpoints.**
 
-The program reads names from a CSV, submits each name to the public Czech declension site sklonuj.cz by automating its HTML form (GET for session cookies, then POST with field `inpJmena`), parses the vocative from the returned HTML table, and writes columns for vocative text and split first or last fragments to an output CSV. It processes input in large pandas chunks, overlaps many names in flight via asyncio tasks, persists progress in `checkpoint.json`, and can resume after interruption. If the configured input file is missing, `main.py` generates a small dummy `names.csv` so the pipeline still runs.
+![python](https://img.shields.io/badge/python-3.10+-3776AB?style=flat-square&logo=python&logoColor=white)
+![license](https://img.shields.io/badge/license-MIT-A31F34?style=flat-square)
+![status](https://img.shields.io/badge/status-active-22863A?style=flat-square)
+![aiohttp](https://img.shields.io/badge/aiohttp-3.9-2C5BB4?style=flat-square)
+![pandas](https://img.shields.io/badge/pandas-2.2-150458?style=flat-square&logo=pandas&logoColor=white)
+![beautifulsoup4](https://img.shields.io/badge/bs4-4.12-777?style=flat-square)
 
-## Why it was built
+Czech is a heavily-inflected language and the vocative ("Hello **Jene**", not "Hello **Jan**") is a correctness requirement for any personalised email, CRM, or DB-driven customer communication. There's no clean public API, so this tool scripts the form at [sklonuj.cz](https://sklonuj.cz/): GET session cookies, POST `inpJmena=<name>`, parse the vocative cell out of the returned HTML table.
 
-The motivation is to support cleaning personal data held in a database: the tool batch-generates Czech vocatives for names so large extracts or update batches do not require hand-declining every row.
+Runs it at scale: pandas chunked reads, a shared aiohttp session, configurable worker semaphore, adaptive delay/concurrency/batch-size based on per-batch success rates, and a JSON checkpoint that allows resuming after `Ctrl+C` without re-requesting anything.
+
+## Run
+
+```bash
+uv venv
+uv pip install -r requirements.txt
+# put names into names.csv with a column matching INPUT_COLUMN_NAME (default 'Name')
+python main.py
+```
+
+If `names.csv` is missing, `main.py` generates a small dummy so the pipeline still runs end-to-end.
+
+Output lands in `names_with_vocative.csv` with columns for the vocative text and the split first/last fragments.
 
 ## Architecture
 
-`main.py` drives the loop: it counts or estimates input rows, optionally creates an empty output CSV with headers, reads the input in chunks of `CHUNK_SIZE` from `src/config.py`, cleans rows, and delegates each chunk to `BatchService`. `BatchService` splits the chunk into batches sized by `AdaptiveBatchSize`, skips work already present in `CheckpointService`, schedules `NameService.process_single_name` under a cap from `AdaptiveWorkers`, merges results back into the chunk DataFrame, and calls `CheckpointService.save_checkpoint` on an interval and when a chunk finishes. `NameService` holds per-name retry and backoff state and uses BeautifulSoup with fixed table class selectors to extract the vocative cell. `AdaptiveDelay`, `AdaptiveWorkers`, and `AdaptiveBatchSize` in `src/adapters.py` adjust delay, concurrency, and batch size from batch-level success rates. `GracefulShutdownHandler` and `create_aiohttp_session` in `src/utils.py` register SIGINT or SIGTERM handling and supply a shared `aiohttp.ClientSession`. `NameResult` in `src/models.py` carries parsed fields and a `success` flag based on whether the returned string differs from the input (case-insensitive).
+```
+main.py           → reads CHUNK_SIZE rows from CSV, delegates to BatchService
+BatchService      → splits chunk into AdaptiveBatchSize batches, skips already-done names
+NameService       → one request per name via aiohttp + BeautifulSoup, with per-name retry/backoff
+CheckpointService → persists every processed (name → result) pair to checkpoint.json
+AdaptiveDelay/Workers/BatchSize → tune the three knobs based on recent success ratios
+```
 
-## Key decisions
+Two layers of backoff: `NameService` scales waits on 429/5xx/connection errors, while the adapters tune the whole pipeline's aggressiveness based on batch-level success rates (thresholds at 0.95 and 0.8).
 
-- Async I/O with aiohttp suits many sequential HTTP round-trips to one host rather than a synchronous loop.
-- Chunked pandas reads bound memory for large CSVs while `CheckpointService` stores a growing JSON map of all processed names for resume, trading disk and serialization cost for global deduplication across chunks.
-- Two layers of backoff appear in the design: `NameService` scales waits on 429, 5xx, and connection errors, while adapters tune delay, workers, and batch size from success ratios.
-- User-Agent strings are rotated from a list in config and set per request because the session skips aiohttp’s default User-Agent header.
-- The aiohttp connector sets `ssl=False` even though `API_CONFIG` uses an `https` base URL.
+## Key design choices
 
-## Trade-offs
+- **aiohttp over requests** — hundreds of small round-trips to one host dominate total time, and async wins there.
+- **Chunked pandas reads** bound memory on multi-million-row CSVs while the checkpoint serves as a global deduplication map across chunks.
+- **User-Agent rotation** from a config list, set per request; the aiohttp session is constructed without the default UA.
+- **Runs on Windows too** — signal handler registration has a fallback for the Windows ProactorEventLoop which doesn't support `add_signal_handler` (ships a `signal.signal()` path for SIGINT).
 
-- Checkpoint JSON retains every processed name in one object, which simplifies resume and reuse across batches but grows with the dataset size and rewrite cost.
-- HTML scraping depends on sklonuj.cz markup; a stable API contract was not used.
-- Concurrency is tuned with several magic thresholds in adapters (for example 0.95 and 0.8 success rates) without external calibration documented in the repo.
-- `MEMORY_LIMIT` exists in `HTTP_CONFIG` but is not referenced elsewhere in the codebase.
+## Known limits
 
-## Limitations
+- Depends entirely on sklonuj.cz's HTML structure. Markup change = the scraper breaks.
+- The checkpoint JSON grows linearly with the dataset — for tens of millions of names the per-flush serialization cost becomes non-trivial.
+- No tests. Validation is manual: spot-check `names_with_vocative.csv` against known declensions.
+- Several adaptive thresholds are magic numbers in `src/adapters.py` without external calibration.
 
-- There is no test directory or test files in the repository.
-- Behavior is coupled to sklonuj.cz availability, rate limiting, and unchanged form URLs and HTML table structure.
-- After a chunk completes, `BatchService` advances `last_chunk_fully_processed_index` to that chunk index; `main.py` then evaluates whether to append the chunk to the output CSV using `last_chunk_fully_processed_index >= current_chunk_index`, which suppresses the append when shutdown has not been requested, so successful runs may leave `names_with_vocative.csv` with only headers unless that condition is not hit.
-- Dummy input creation on missing `names.csv` makes dry runs easy but can overwrite expectations if a run starts without the intended file.
-- Python version is not pinned; dependencies are pinned in `requirements.txt` to specific package versions.
+## License
 
-## How to run
-
-Create a virtual environment, install dependencies with `pip install -r requirements.txt`, supply a CSV whose configured name column exists (`INPUT_COLUMN_NAME` in `src/config.py`, default `Name`), and use `FILE_CONFIG` paths (default `names.csv` input and `names_with_vocative.csv` output). If `ID` is absent, `main.py` synthesizes sequential IDs per chunk. Run `python main.py`. Logging uses `LOGGING_CONFIG` (console handler).
+[MIT](LICENSE)
