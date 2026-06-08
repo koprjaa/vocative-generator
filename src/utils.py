@@ -38,7 +38,6 @@ class GracefulShutdownHandler:
 async def create_aiohttp_session():
     # Pool sized for peak concurrency; traffic is single-host so per-host cap matches worker cap.
     connector = TCPConnector(
-        ssl=False,
         limit=HTTP_CONFIG['MAX_WORKERS'] * 2,
         limit_per_host=HTTP_CONFIG['MAX_WORKERS']
     )
