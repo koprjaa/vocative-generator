@@ -117,18 +117,6 @@ class CheckpointService:
     def get_globally_processed_name_data(self, name: str) -> Optional[Dict[str,str]]:
         return self.processed_names.get(name)
 
-    # possibly external dependency — verify before removing
-    def clear_checkpoint_for_new_run(self) -> None:
-        try:
-            if self.checkpoint_file.exists():
-                self.checkpoint_file.unlink()
-            self.processed_names = {}
-            self.last_batch_completed_for_current_chunk = 0
-            self.last_chunk_fully_processed_index = -1
-            self.logger.info("Checkpoint cleared for a new run.")
-        except Exception as e:
-            self.logger.error(f"Error clearing checkpoint: {e}", exc_info=True)
-
 
 class NameService:
     def __init__(self, session: aiohttp.ClientSession, user_agent_manager: UserAgentManager):
