@@ -12,7 +12,6 @@
 #
 # License: MIT
 
-from typing import List
 
 LOGGING_CONFIG = {
     'version': 1,
@@ -70,7 +69,7 @@ HTTP_CONFIG = {
     'RATE_LIMIT_BACKOFF_MULTIPLIER': 2.0,
 }
 
-USER_AGENTS: List[str] = [
+USER_AGENTS: list[str] = [
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0',
     'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',

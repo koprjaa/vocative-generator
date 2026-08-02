@@ -15,15 +15,15 @@
 import asyncio
 import logging
 import logging.config
-import time
 import signal
-import pandas as pd
+import time
 from pathlib import Path
-from typing import Tuple
 
-from src.config import LOGGING_CONFIG, HTTP_CONFIG, FILE_CONFIG, USER_AGENTS
-from src.adapters import AdaptiveDelay, AdaptiveWorkers, AdaptiveBatchSize, UserAgentManager
-from src.services import CheckpointService, NameService, BatchService
+import pandas as pd
+
+from src.adapters import make_batch_size, make_delay, make_workers
+from src.config import FILE_CONFIG, HTTP_CONFIG, LOGGING_CONFIG
+from src.services import BatchService, CheckpointService, NameService
 from src.utils import GracefulShutdownHandler, create_aiohttp_session
 
 logging.config.dictConfig(LOGGING_CONFIG)
@@ -57,11 +57,12 @@ def _persist_loaded_checkpoint_to_disk(checkpoint_service: CheckpointService) ->
 def _estimate_total_csv_rows(input_file: str) -> int:
     try:
         total_rows_in_file = sum(1 for _ in pd.read_csv(input_file, chunksize=10000, usecols=[0])) - 1
-        logger.info(f"Total records to process in {input_file}: {total_rows_in_file:,}")
-        return total_rows_in_file
     except Exception as e:
         logger.warning(f"Could not determine total rows in input file: {e}")
         return -1
+    else:
+        logger.info(f"Total records to process in {input_file}: {total_rows_in_file:,}")
+        return total_rows_in_file
 
 
 def _initialize_output_csv_for_run(checkpoint_service: CheckpointService, output_file: str) -> None:
@@ -81,7 +82,7 @@ async def _process_one_input_chunk(
     batch_service: BatchService,
     output_file: str,
     total_rows_in_file: int,
-) -> Tuple[int, bool]:
+) -> tuple[int, bool]:
     if shutdown_handler.shutdown_requested:
         logger.info("Shutdown requested, stopping further chunk processing.")
         return total_processed_rows, True
@@ -116,7 +117,8 @@ async def _process_one_input_chunk(
         return total_processed_rows, False
 
     for col in ['Vocative', 'Vocative First Name', 'Vocative Last Name', 'Error']:
-        if col not in chunk_df.columns: chunk_df[col] = pd.NA
+        if col not in chunk_df.columns:
+            chunk_df[col] = pd.NA
 
     await batch_service.process_chunk_data(chunk_df, current_chunk_index)
 
@@ -166,8 +168,8 @@ def _log_main_task_result_if_finished(main_task: asyncio.Task, done: set) -> Non
         logger.info("Main processing task completed.")
     except asyncio.CancelledError:
         logger.info("Main processing task was cancelled (as expected or externally).")
-    except Exception as e:
-        logger.error(f"Main processing task failed with an exception: {e}", exc_info=True)
+    except Exception:
+        logger.exception("Main processing task failed with an exception")
 
 
 async def _cancel_all_outstanding_tasks(loop: asyncio.AbstractEventLoop) -> None:
@@ -194,28 +196,25 @@ async def process_all_names_main_task(shutdown_handler: GracefulShutdownHandler)
 
     _ensure_input_csv_or_dummy(input_file)
 
-    delay_adapter = AdaptiveDelay(
-        initial_delay=HTTP_CONFIG['INITIAL_DELAY'],
-        max_delay=HTTP_CONFIG['MAX_DELAY'],
-        min_delay=HTTP_CONFIG['MIN_DELAY']
+    delay_adapter = make_delay(
+        HTTP_CONFIG['INITIAL_DELAY'], HTTP_CONFIG['MIN_DELAY'], HTTP_CONFIG['MAX_DELAY']
     )
-    worker_adapter = AdaptiveWorkers(
-        initial_workers=HTTP_CONFIG.get('INITIAL_WORKERS', HTTP_CONFIG['MIN_WORKERS']),
-        max_workers=HTTP_CONFIG['MAX_WORKERS'],
-        min_workers=HTTP_CONFIG['MIN_WORKERS']
+    worker_adapter = make_workers(
+        HTTP_CONFIG.get('INITIAL_WORKERS', HTTP_CONFIG['MIN_WORKERS']),
+        HTTP_CONFIG['MIN_WORKERS'],
+        HTTP_CONFIG['MAX_WORKERS'],
     )
-    user_agent_manager = UserAgentManager(USER_AGENTS)
-    batch_size_adapter = AdaptiveBatchSize(
-        initial_size=HTTP_CONFIG['BATCH_SIZE'],
-        max_size=HTTP_CONFIG.get('MAX_BATCH_SIZE', HTTP_CONFIG['BATCH_SIZE'] * 2),
-        min_size=HTTP_CONFIG.get('MIN_BATCH_SIZE', max(10, HTTP_CONFIG['BATCH_SIZE'] // 4))
+    batch_size_adapter = make_batch_size(
+        HTTP_CONFIG['BATCH_SIZE'],
+        HTTP_CONFIG.get('MIN_BATCH_SIZE', max(10, HTTP_CONFIG['BATCH_SIZE'] // 4)),
+        HTTP_CONFIG.get('MAX_BATCH_SIZE', HTTP_CONFIG['BATCH_SIZE'] * 2),
     )
     checkpoint_service = CheckpointService()
 
     _persist_loaded_checkpoint_to_disk(checkpoint_service)
 
     async with create_aiohttp_session() as session:
-        name_service = NameService(session, user_agent_manager)
+        name_service = NameService(session)
         batch_service = BatchService(
             name_service, checkpoint_service,
             delay_adapter, worker_adapter, batch_size_adapter,
@@ -254,7 +253,7 @@ async def process_all_names_main_task(shutdown_handler: GracefulShutdownHandler)
             raise
 
     total_time = time.time() - start_time_total
-    logger.info(f"=== Total Processing Finished ===")
+    logger.info("=== Total Processing Finished ===")
     logger.info(f"Total execution time: {total_time:.2f} seconds")
     logger.info(f"Total records processed across all chunks: {total_processed_rows:,}")
 
@@ -266,7 +265,7 @@ async def main_wrapper():
     for sig in (signal.SIGINT, signal.SIGTERM):
         try:
             loop.add_signal_handler(sig, shutdown_handler.handle_signal, sig, None)
-        except NotImplementedError:
+        except NotImplementedError:  # noqa: PERF203 - two signals, once at startup
             # Windows: add_signal_handler is not supported on ProactorEventLoop.
             # Fall back to signal.signal() for SIGINT; SIGTERM is not delivered on Windows.
             if sig == signal.SIGINT:

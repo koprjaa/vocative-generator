@@ -12,27 +12,27 @@
 #
 # License: MIT
 
-import logging
+import asyncio
 import json
-import os
+import logging
 import random
 import time
-import asyncio
-import pandas as pd
-import aiohttp
 from pathlib import Path
-from typing import Dict, Optional, List, Tuple, Set
-from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 
-from .config import FILE_CONFIG, API_CONFIG, HTTP_CONFIG
+import aiohttp
+import pandas as pd
+
+from .adapters import AdaptiveValue
+from .config import API_CONFIG, FILE_CONFIG, HTTP_CONFIG, USER_AGENTS
 from .models import NameResult
-from .adapters import AdaptiveDelay, AdaptiveWorkers, AdaptiveBatchSize, UserAgentManager
+from .parsing import extract_vocative
+
 
 class CheckpointService:
     def __init__(self):
         self.checkpoint_file = Path(FILE_CONFIG['CHECKPOINT_FILE'])
-        self.processed_names: Dict[str, Dict[str, str]] = {}
+        self.processed_names: dict[str, dict[str, str]] = {}
         self.last_batch_completed_for_current_chunk = 0
         self.last_chunk_fully_processed_index = -1
         self.logger = logging.getLogger(self.__class__.__name__)
@@ -41,7 +41,7 @@ class CheckpointService:
     def _load_checkpoint(self) -> None:
         try:
             if self.checkpoint_file.exists():
-                with open(self.checkpoint_file, 'r', encoding='utf-8') as f:
+                with self.checkpoint_file.open(encoding='utf-8') as f:
                     data = json.load(f)
                     self.processed_names = data.get('processed_names', {})
                     self.last_batch_completed_for_current_chunk = data.get(
@@ -51,8 +51,8 @@ class CheckpointService:
                 self.logger.info(f"Checkpoint loaded: {len(self.processed_names)} processed names, "
                                  f"last_chunk_idx: {self.last_chunk_fully_processed_index}, "
                                  f"last_batch_in_chunk: {self.last_batch_completed_for_current_chunk}")
-        except Exception as e:
-            self.logger.error(f"Error loading checkpoint: {e}", exc_info=True)
+        except Exception:
+            self.logger.exception("Error loading checkpoint")
             self.processed_names = {}
             self.last_batch_completed_for_current_chunk = 0
             self.last_chunk_fully_processed_index = -1
@@ -60,12 +60,12 @@ class CheckpointService:
                 try:
                     self.checkpoint_file.unlink(missing_ok=True)
                     self.logger.info("Corrupted checkpoint file removed.")
-                except OSError as ose:
-                    self.logger.error(f"Could not remove corrupted checkpoint file: {ose}")
+                except OSError:
+                    self.logger.exception("Could not remove corrupted checkpoint file")
 
 
-    def save_checkpoint(self, current_chunk_index: int, batch_number_in_chunk: int, 
-                        processed_batch_data: Dict[str, Dict[str, str]], 
+    def save_checkpoint(self, current_chunk_index: int, batch_number_in_chunk: int,
+                        processed_batch_data: dict[str, dict[str, str]],
                         is_chunk_complete: bool) -> None:
         try:
             for name_key, data_val in processed_batch_data.items():
@@ -86,9 +86,9 @@ class CheckpointService:
                 data_to_save['last_batch_completed_for_current_chunk'] = batch_number_in_chunk
 
             temp_checkpoint_file = self.checkpoint_file.with_suffix('.tmp')
-            with open(temp_checkpoint_file, 'w', encoding='utf-8') as f:
+            with temp_checkpoint_file.open('w', encoding='utf-8') as f:
                 json.dump(data_to_save, f, ensure_ascii=False, separators=(',', ':'))
-            os.replace(temp_checkpoint_file, self.checkpoint_file)
+            temp_checkpoint_file.replace(self.checkpoint_file)
 
             self.logger.info(f"Checkpoint saved. Chunk_idx: {current_chunk_index}, batch_in_chunk: {batch_number_in_chunk}, "
                              f"is_chunk_complete: {is_chunk_complete}. Total processed: {len(self.processed_names)}.")
@@ -98,11 +98,11 @@ class CheckpointService:
                 self.last_batch_completed_for_current_chunk = 0
             else:
                 self.last_batch_completed_for_current_chunk = batch_number_in_chunk
-            
-        except Exception as e:
-            self.logger.error(f"Error saving checkpoint: {e}", exc_info=True)
 
-    def get_resume_info(self, current_chunk_index: int) -> Tuple[int, Dict[str, Dict[str,str]]]:
+        except Exception:
+            self.logger.exception("Error saving checkpoint")
+
+    def get_resume_info(self, current_chunk_index: int) -> tuple[int, dict[str, dict[str,str]]]:
         """(-1, {}) => chunk already finished; else (next batch index, global name cache)."""
         if current_chunk_index <= self.last_chunk_fully_processed_index:
             return -1, {}
@@ -114,7 +114,7 @@ class CheckpointService:
         return 0, self.processed_names
 
 
-    def get_globally_processed_name_data(self, name: str) -> Optional[Dict[str,str]]:
+    def get_globally_processed_name_data(self, name: str) -> dict[str, str] | None:
         return self.processed_names.get(name)
 
     # possibly external dependency — verify before removing
@@ -126,14 +126,13 @@ class CheckpointService:
             self.last_batch_completed_for_current_chunk = 0
             self.last_chunk_fully_processed_index = -1
             self.logger.info("Checkpoint cleared for a new run.")
-        except Exception as e:
-            self.logger.error(f"Error clearing checkpoint: {e}", exc_info=True)
+        except Exception:
+            self.logger.exception("Error clearing checkpoint")
 
 
 class NameService:
-    def __init__(self, session: aiohttp.ClientSession, user_agent_manager: UserAgentManager):
+    def __init__(self, session: aiohttp.ClientSession):
         self.session = session
-        self.user_agent_manager = user_agent_manager
         self.base_url = API_CONFIG['BASE_URL']
         self.endpoint = API_CONFIG['ENDPOINT']
         self.max_retries = HTTP_CONFIG['MAX_RETRIES']
@@ -146,9 +145,9 @@ class NameService:
         self.total_requests = 0
         self.total_errors = 0
 
-    def _get_headers(self) -> Dict[str, str]:
-        base_headers = {
-            'User-Agent': self.user_agent_manager.get_next_user_agent(),
+    def _get_headers(self) -> dict[str, str]:
+        return {
+            'User-Agent': random.choice(USER_AGENTS),
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
             'Accept-Language': 'cs,en-US;q=0.7,en;q=0.3',
             'Accept-Encoding': 'gzip, deflate, br',
@@ -160,7 +159,6 @@ class NameService:
             'Sec-Fetch-User': '?1',
             'Cache-Control': 'max-age=0',
         }
-        return base_headers
 
     async def _handle_rate_limit_or_server_error_delay(self, error_type: str, attempt: int) -> None:
         current_time = time.time()
@@ -179,7 +177,7 @@ class NameService:
             self.global_backoff_factor * multiplier,
             HTTP_CONFIG['RATE_LIMIT_MAX_GLOBAL_BACKOFF_FACTOR']
         )
-        
+
         if self.global_backoff_factor > old_factor:
             self.last_backoff_factor_increase_time = current_time
             self.logger.warning(
@@ -212,22 +210,22 @@ class NameService:
                 1.0,
                 self.global_backoff_factor * HTTP_CONFIG['BACKOFF_REDUCTION_ON_SUCCESS_RATIO']
             )
-            
+
             if self.global_backoff_factor < old_factor:
                 self.logger.info(
                     f"Backoff factor reduced: {old_factor:.1f} -> {self.global_backoff_factor:.1f} "
                     f"after {self.consecutive_successes_since_last_error} consecutive successes"
                 )
 
-    async def _get_form_and_cookies(self, url: str, headers: Dict[str, str], attempt: int) -> bool:
+    async def _get_form_and_cookies(self, url: str, headers: dict[str, str], attempt: int) -> bool:
         try:
             async with self.session.get(url, headers=headers) as response_get:
                 self.logger.debug(f"GET {url} status: {response_get.status} (Attempt: {attempt})")
-                
+
                 if response_get.status == 429:
                     await self._handle_rate_limit_or_server_error_delay('rate_limit', attempt)
                     return False
-                
+
                 if response_get.status >= 500:
                     await self._handle_rate_limit_or_server_error_delay('server_error', attempt)
                     return False
@@ -240,18 +238,18 @@ class NameService:
             self.logger.warning(f"Timeout on GET {url} (Attempt: {attempt}).")
             await self._handle_rate_limit_or_server_error_delay('connection_error', attempt)
             return False
-            
+
         except aiohttp.ClientResponseError as e:
             if e.status not in [429, 500, 502, 503, 504]:
                 raise
             return False
-            
+
         except aiohttp.ClientError as e:
             self.logger.warning(f"ClientError on GET {url}: {e} (Attempt: {attempt}).")
             await self._handle_rate_limit_or_server_error_delay('connection_error', attempt)
             return False
 
-    async def _submit_form_and_get_vocative(self, url: str, headers: Dict[str, str], name: str, attempt: int) -> Optional[str]:
+    async def _submit_form_and_get_vocative(self, url: str, headers: dict[str, str], name: str, attempt: int) -> str | None:
         post_headers = headers.copy()
         post_headers.update({
             'Content-Type': 'application/x-www-form-urlencoded',
@@ -266,11 +264,11 @@ class NameService:
         try:
             async with self.session.post(url, data=data, headers=post_headers, cookies=self.current_request_cookies) as response_post:
                 self.logger.debug(f"POST {url} for '{name}' status: {response_post.status} (Attempt: {attempt})")
-                
+
                 if response_post.status == 429:
                     await self._handle_rate_limit_or_server_error_delay('rate_limit', attempt)
                     return None
-                
+
                 if response_post.status >= 500:
                     await self._handle_rate_limit_or_server_error_delay('server_error', attempt)
                     return None
@@ -286,61 +284,26 @@ class NameService:
             self.logger.warning(f"Timeout on POST for '{name}' (Attempt: {attempt}).")
             await self._handle_rate_limit_or_server_error_delay('connection_error', attempt)
             return None
-            
+
         except aiohttp.ClientResponseError as e:
             if e.status not in [429, 500, 502, 503, 504]:
                 raise
             return None
-            
+
         except aiohttp.ClientError as e:
             self.logger.warning(f"ClientError on POST for '{name}': {e} (Attempt: {attempt}).")
             await self._handle_rate_limit_or_server_error_delay('connection_error', attempt)
             return None
 
     def _extract_vocative(self, html: str, original_name: str) -> str:
-        try:
-            soup = BeautifulSoup(html, 'html.parser')
-            # Site layout: primary results table or a simpler fallback class after markup changes.
-            table = (soup.find('table', class_='table table-hover table-striped table-bordered') or
-                     soup.find('table', class_='table'))
-            
-            if not table:
-                self.logger.warning(
-                    f"No table found for '{original_name}'. HTML preview (1000 chars):\n{html[:1000]}"
-                )
-                return ""
-            
-            rows = table.find_all('tr', limit=10)
-            if len(rows) <= 1:
-                self.logger.warning(
-                    f"No data rows found for '{original_name}'. Table HTML:\n{table.prettify()[:500]}"
-                )
-                return ""
-            
-            for row in rows[1:]:
-                cells = row.find_all('td', limit=2)
-                if len(cells) >= 2:
-                    vocative_candidate = cells[1].text.strip()
-
-                    self.logger.debug(
-                        f"Extracted for '{original_name}': vocative='{vocative_candidate}'"
-                    )
-
-                    return vocative_candidate
-            
+        """Vocative from a results page. Logs what the page held when it fails."""
+        vocative = extract_vocative(html)
+        if not vocative:
             self.logger.warning(
-                f"No matching row found for '{original_name}' in results table. "
-                f"HTML preview (1000 chars):\n{html[:1000]}"
+                "No vocative for '%s'. HTML preview (1000 chars):\n%s",
+                original_name, html[:1000],
             )
-            return ""
-            
-        except Exception as e:
-            self.logger.error(
-                f"Error extracting vocative for '{original_name}': {e}\n"
-                f"HTML preview (1000 chars):\n{html[:1000]}",
-                exc_info=True
-            )
-            return ""
+        return vocative
 
     async def process_single_name(self, name: str) -> NameResult:
         url = urljoin(self.base_url, self.endpoint)
@@ -361,7 +324,7 @@ class NameService:
                     if attempt <= self.max_retries:
                         continue
                     return NameResult.error(name, f"Failed POST after {attempt-1} retries")
-                
+
                 self.logger.info(
                     f"Processed '{name}'. Vocative: '{vocative_result if vocative_result else '(empty)'}'. "
                     f"Success rate: {((self.total_requests - self.total_errors) / max(1, self.total_requests)) * 100:.1f}%"
@@ -370,22 +333,22 @@ class NameService:
 
             except aiohttp.ClientResponseError as e:
                 if e.status in [401, 403]:
-                    self.logger.error(f"Non-recoverable HTTP error for '{name}': {e.status} {e.message}")
+                    self.logger.warning("Non-recoverable HTTP error for '%s': %s %s", name, e.status, e.message)
                     return NameResult.error(name, f"HTTP {e.status}: {e.message}")
                 if attempt <= self.max_retries:
                     continue
                 return NameResult.error(name, f"HTTP {e.status}: {e.message}")
-                
+
             except Exception as e:
-                self.logger.error(f"Unexpected error processing '{name}': {e}", exc_info=True)
-                return NameResult.error(name, f"Unexpected error: {str(e)}")
-        
+                self.logger.exception("Unexpected error processing '%s'", name)
+                return NameResult.error(name, f"Unexpected error: {e!s}")
+
         return NameResult.error(name, f"Failed to process after {self.max_retries + 1} attempts")
 
 
 class BatchService:
     def __init__(self, name_service: NameService, checkpoint_service: CheckpointService,
-                 delay_adapter: AdaptiveDelay, worker_adapter: AdaptiveWorkers, batch_size_adapter: AdaptiveBatchSize,
+                 delay_adapter: AdaptiveValue, worker_adapter: AdaptiveValue, batch_size_adapter: AdaptiveValue,
                  shutdown_event: asyncio.Event):
         self.name_service = name_service
         self.checkpoint_service = checkpoint_service
@@ -402,7 +365,7 @@ class BatchService:
         self.batches_since_last_checkpoint = 0
         self.pending_checkpoint_data = {}
 
-    def _update_adaptive_mechanisms(self, batch_results: List[NameResult]) -> None:
+    def _update_adaptive_mechanisms(self, batch_results: list[NameResult]) -> None:
         self.current_batch_successes = 0
         self.current_batch_errors = 0
 
@@ -411,32 +374,19 @@ class BatchService:
                 self.current_batch_successes += 1
             else:
                 self.current_batch_errors += 1
-        
+
         total_requests = self.current_batch_successes + self.current_batch_errors
         if total_requests > 0:
             success_rate = self.current_batch_successes / total_requests
 
-            if success_rate >= 0.95:
-                self.delay_adapter.on_success(success_rate)
-            elif success_rate < 0.8:
-                self.delay_adapter.on_error(success_rate)
-
-            if success_rate >= 0.9:
-                self.worker_adapter.record_success()
-            else:
-                self.worker_adapter.record_error()
-
-            if success_rate >= 0.95:
-                self.batch_size_adapter.record_success()
-            else:
-                self.batch_size_adapter.record_error()
+            self.delay_adapter.adjust(success_rate)
 
             self.logger.info(
                 f"Batch statistics: {self.current_batch_successes}/{total_requests} successful "
                 f"({success_rate*100:.1f}%). "
-                f"Current delay: {self.delay_adapter.current_delay:.2f}s, "
-                f"workers: {self.worker_adapter.current_workers}, "
-                f"batch size: {self.batch_size_adapter.current_size}"
+                f"Current delay: {self.delay_adapter.value:.2f}s, "
+                f"workers: {self.worker_adapter.value}, "
+                f"batch size: {self.batch_size_adapter.value}"
             )
 
     async def process_chunk_data(self, df_chunk: pd.DataFrame, chunk_index: int) -> None:
@@ -453,7 +403,7 @@ class BatchService:
 
         all_names_in_chunk = df_chunk[FILE_CONFIG['INPUT_COLUMN_NAME']].tolist()
 
-        initial_batch_size = self.batch_size_adapter.current_size
+        initial_batch_size = self.batch_size_adapter.value
 
         batches_of_names = [
             all_names_in_chunk[i:i + initial_batch_size]
@@ -464,8 +414,8 @@ class BatchService:
 
         self.batches_since_last_checkpoint = 0
         self.pending_checkpoint_data = {}
-        
-        tasks: Set[asyncio.Task] = set()
+
+        tasks: set[asyncio.Task] = set()
         processed_batches_count_in_chunk = 0
 
         for i, current_batch_names_list in enumerate(batches_of_names):
@@ -479,8 +429,8 @@ class BatchService:
                 processed_batches_count_in_chunk += 1
                 continue
 
-            batch_results_from_checkpoint: List[NameResult] = []
-            names_needing_api_call: List[str] = []
+            batch_results_from_checkpoint: list[NameResult] = []
+            names_needing_api_call: list[str] = []
 
             for name_in_batch in current_batch_names_list:
                 processed_data = self.checkpoint_service.get_globally_processed_name_data(name_in_batch)
@@ -489,7 +439,7 @@ class BatchService:
                     batch_results_from_checkpoint.append(NameResult.from_vocative(name_in_batch, voc))
                 else:
                     names_needing_api_call.append(name_in_batch)
-            
+
             if not names_needing_api_call:
                 self.logger.info(f"Batch {batch_number_for_display} (chunk {chunk_index}) fully processed from checkpoint.")
                 self._update_dataframe_with_results(df_chunk, batch_results_from_checkpoint, self.name_to_idx_map)
@@ -507,23 +457,23 @@ class BatchService:
                     self.batches_since_last_checkpoint >= self.checkpoint_interval or
                     batch_number_for_display == total_batches_in_chunk
                 )
-                
+
                 if should_save_checkpoint and self.pending_checkpoint_data:
                     self.checkpoint_service.save_checkpoint(
-                        chunk_index, batch_number_for_display, 
+                        chunk_index, batch_number_for_display,
                         self.pending_checkpoint_data,
                         is_chunk_complete=False
                     )
                     self.pending_checkpoint_data = {}
                     self.batches_since_last_checkpoint = 0
-                
+
                 processed_batches_count_in_chunk += 1
                 self._log_batch_progress(processed_batches_count_in_chunk, total_batches_in_chunk, chunk_index, start_time_chunk)
                 continue
 
             self.logger.info(f"Preparing batch {batch_number_for_display}/{total_batches_in_chunk} (chunk {chunk_index}) "
                              f"with {len(names_needing_api_call)} new names (total {len(current_batch_names_list)}).")
-            
+
             task = asyncio.create_task(self._process_single_batch(
                 names_to_process=names_needing_api_call,
                 batch_number=batch_number_for_display,
@@ -532,7 +482,7 @@ class BatchService:
             tasks.add(task)
 
             shutdown_processing = False
-            while len(tasks) >= self.worker_adapter.current_workers or \
+            while len(tasks) >= self.worker_adapter.value or \
                   (batch_number_for_display == total_batches_in_chunk and tasks):
                 if self.shutdown_event.is_set() and not shutdown_processing:
                     if tasks:
@@ -543,10 +493,10 @@ class BatchService:
                             tasks = pending_tasks
                             for t in completed_tasks:
                                 try:
-                                    api_results_for_batch: List[NameResult] = t.result()
+                                    api_results_for_batch: list[NameResult] = t.result()
                                     full_batch_results = batch_results_from_checkpoint + api_results_for_batch
                                     self._update_dataframe_with_results(df_chunk, full_batch_results, self.name_to_idx_map)
-                                    
+
                                     checkpoint_data_for_batch = {}
                                     for r_api in api_results_for_batch:
                                         if r_api.original_name in self.name_to_idx_map:
@@ -557,28 +507,30 @@ class BatchService:
                                                 'id': name_id
                                             }
                                         if r_api.success:
-                                            self.batch_size_adapter.record_success()
-                                            self.worker_adapter.record_success()
+                                            self.batch_size_adapter.record(True)
+
+                                            self.worker_adapter.record(True)
                                         else:
-                                            self.batch_size_adapter.record_error()
-                                            self.worker_adapter.record_error()
-                                    
+                                            self.batch_size_adapter.record(False)
+
+                                            self.worker_adapter.record(False)
+
                                     self.pending_checkpoint_data.update(checkpoint_data_for_batch)
                                     processed_batches_count_in_chunk += 1
-                                except Exception as e:
-                                    self.logger.error(f"Error processing task during shutdown: {e}", exc_info=True)
+                                except Exception:  # noqa: PERF203 - one task per iteration, the cost is the await
+                                    self.logger.exception("Error processing task during shutdown")
                         except asyncio.TimeoutError:
-                            self.logger.warning(f"Timeout waiting for tasks to complete during shutdown. Cancelling remaining tasks.")
+                            self.logger.warning("Timeout waiting for tasks to complete during shutdown. Cancelling remaining tasks.")
                             for t in tasks:
                                 t.cancel()
                     break
 
                 completed_tasks, pending_tasks = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
                 tasks = pending_tasks
-                
+
                 for t in completed_tasks:
                     try:
-                        api_results_for_batch: List[NameResult] = t.result()
+                        api_results_for_batch: list[NameResult] = t.result()
 
                         full_batch_results = batch_results_from_checkpoint + api_results_for_batch
 
@@ -593,12 +545,14 @@ class BatchService:
                                     'vocative': r_api.vocative,
                                     'id': name_id
                                 }
-                            if r_api.success: 
-                                self.batch_size_adapter.record_success()
-                                self.worker_adapter.record_success()
-                            else: 
-                                self.batch_size_adapter.record_error()
-                                self.worker_adapter.record_error()
+                            if r_api.success:
+                                self.batch_size_adapter.record(True)
+
+                                self.worker_adapter.record(True)
+                            else:
+                                self.batch_size_adapter.record(False)
+
+                                self.worker_adapter.record(False)
 
                         self.pending_checkpoint_data.update(checkpoint_data_for_batch)
                         self.batches_since_last_checkpoint += 1
@@ -611,24 +565,25 @@ class BatchService:
                             # Task name holds the batch index; completions may finish out of submission order.
                             batch_num_for_checkpoint = int(t.get_name()) if t.get_name().isdigit() else processed_batches_count_in_chunk + 1
                             self.checkpoint_service.save_checkpoint(
-                                chunk_index, 
+                                chunk_index,
                                 batch_num_for_checkpoint,
                                 self.pending_checkpoint_data,
-                                is_chunk_complete=False 
+                                is_chunk_complete=False
                             )
                             self.pending_checkpoint_data = {}
                             self.batches_since_last_checkpoint = 0
-                        
+
                         processed_batches_count_in_chunk += 1
                         self._log_batch_progress(processed_batches_count_in_chunk, total_batches_in_chunk, chunk_index, start_time_chunk)
 
-                    except asyncio.CancelledError:
+                    except asyncio.CancelledError:  # noqa: PERF203 - one task per iteration
                         self.logger.warning(f"Task for batch (name: {t.get_name()}) was cancelled.")
-                        raise 
-                    except Exception as e:
-                        self.logger.error(f"Error processing result for batch (name: {t.get_name()}): {e}", exc_info=True)
-                        self.batch_size_adapter.record_error()
-                        self.worker_adapter.record_error()
+                        raise
+                    except Exception:
+                        self.logger.exception("Error processing result for batch (name: %s)", t.get_name())
+                        self.batch_size_adapter.record(False)
+
+                        self.worker_adapter.record(False)
 
             self.worker_adapter.adjust()
             self.batch_size_adapter.adjust()
@@ -646,8 +601,8 @@ class BatchService:
         if not self.shutdown_event.is_set() and processed_batches_count_in_chunk == total_batches_in_chunk:
             if self.pending_checkpoint_data:
                 self.checkpoint_service.save_checkpoint(
-                    chunk_index, 
-                    processed_batches_count_in_chunk, 
+                    chunk_index,
+                    processed_batches_count_in_chunk,
                     self.pending_checkpoint_data,
                     is_chunk_complete=False
                 )
@@ -665,17 +620,17 @@ class BatchService:
                     is_chunk_complete=False
                 )
                 self.pending_checkpoint_data = {}
-                self.logger.info(f"Checkpoint saved successfully before shutdown.")
+                self.logger.info("Checkpoint saved successfully before shutdown.")
             self.logger.info(f"Chunk {chunk_index} processing interrupted by shutdown signal. "
                              f"{processed_batches_count_in_chunk}/{total_batches_in_chunk} batches processed.")
         else:
             self.logger.warning(f"Chunk {chunk_index} processing finished, but not all batches completed. "
                                 f"Processed: {processed_batches_count_in_chunk}/{total_batches_in_chunk}.")
 
-    async def _process_single_batch(self, names_to_process: List[str], batch_number: int, chunk_idx: int) -> List[NameResult]:
+    async def _process_single_batch(self, names_to_process: list[str], batch_number: int, chunk_idx: int) -> list[NameResult]:
         asyncio.current_task().set_name(str(batch_number))
 
-        results: List[NameResult] = []
+        results: list[NameResult] = []
         for name in names_to_process:
             if self.shutdown_event.is_set():
                 self.logger.info(f"Shutdown during batch {batch_number} (chunk {chunk_idx}), name '{name}'. Stopping batch.")
@@ -688,7 +643,7 @@ class BatchService:
         self._update_adaptive_mechanisms(results)
         return results
 
-    def _update_dataframe_with_results(self, df_chunk: pd.DataFrame, results: List[NameResult], name_to_idx_map: Dict):
+    def _update_dataframe_with_results(self, df_chunk: pd.DataFrame, results: list[NameResult], name_to_idx_map: dict):
         if not results:
             return
 
@@ -699,7 +654,7 @@ class BatchService:
             'Error': [],
             'indices': []
         }
-        
+
         for res in results:
             if res.original_name in name_to_idx_map:
                 idx = name_to_idx_map[res.original_name]
@@ -710,7 +665,7 @@ class BatchService:
                 update_data['Error'].append(res.error_message if res.error_message else pd.NA)
             else:
                 self.logger.warning(f"Name '{res.original_name}' from results not found in current DataFrame chunk for update.")
-        
+
         if not update_data['indices']:
             return
 
@@ -718,11 +673,11 @@ class BatchService:
         df_chunk.loc[indices, 'Vocative'] = update_data['Vocative']
         df_chunk.loc[indices, 'Vocative First Name'] = update_data['Vocative First Name']
         df_chunk.loc[indices, 'Vocative Last Name'] = update_data['Vocative Last Name']
-        
+
         if 'Error' not in df_chunk.columns:
             df_chunk['Error'] = pd.NA
         df_chunk.loc[indices, 'Error'] = update_data['Error']
-    
+
     def _log_batch_progress(self, completed_in_chunk: int, total_in_chunk: int, chunk_idx:int, chunk_start_time: float):
         progress = (completed_in_chunk / total_in_chunk) * 100 if total_in_chunk > 0 else 0
         elapsed_chunk = time.time() - chunk_start_time
@@ -730,7 +685,7 @@ class BatchService:
         self.logger.info(
             f"Chunk {chunk_idx} Progress: {progress:.1f}% ({completed_in_chunk}/{total_in_chunk} batches). "
             f"Speed: {speed_batch_per_s:.2f} batch/s. "
-            f"Delay: {self.delay_adapter.current_delay:.2f}s, "
-            f"Workers: {self.worker_adapter.current_workers}, "
-            f"BatchSizeCfg: {self.batch_size_adapter.current_size}"
+            f"Delay: {self.delay_adapter.value:.2f}s, "
+            f"Workers: {self.worker_adapter.value}, "
+            f"BatchSizeCfg: {self.batch_size_adapter.value}"
         )

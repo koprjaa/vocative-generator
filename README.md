@@ -5,6 +5,7 @@ Converts Czech first names into the vocative case in bulk. It automates the form
 ![python](https://img.shields.io/badge/python-3.10+-3776AB?style=flat-square&logo=python&logoColor=white)
 ![license](https://img.shields.io/badge/license-MIT-A31F34?style=flat-square)
 ![status](https://img.shields.io/badge/status-active-22863A?style=flat-square)
+[![ci](https://github.com/koprjaa/vocative-generator/actions/workflows/ci.yml/badge.svg)](https://github.com/koprjaa/vocative-generator/actions/workflows/ci.yml)
 
 ## What it does
 

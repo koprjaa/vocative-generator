@@ -13,7 +13,7 @@
 # License: MIT
 
 from dataclasses import dataclass
-from typing import Optional, Tuple
+
 
 @dataclass
 class NameResult:
@@ -22,7 +22,7 @@ class NameResult:
     first_name: str
     surname: str
     success: bool
-    error_message: Optional[str] = None
+    error_message: str | None = None
 
     @classmethod
     def from_vocative(cls, original_name: str, vocative: str) -> 'NameResult':
@@ -49,7 +49,7 @@ class NameResult:
         )
 
     @staticmethod
-    def split_vocative(vocative: str) -> Tuple[str, str]:
+    def split_vocative(vocative: str) -> tuple[str, str]:
         if not vocative:
             return "", ""
         parts = vocative.strip().split()

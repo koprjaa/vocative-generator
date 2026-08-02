@@ -12,13 +12,16 @@
 #
 # License: MIT
 
-import signal
 import asyncio
 import logging
-import aiohttp
-from aiohttp import TCPConnector, ClientTimeout
+import signal
 from contextlib import asynccontextmanager
+
+import aiohttp
+from aiohttp import ClientTimeout, TCPConnector
+
 from .config import HTTP_CONFIG
+
 
 class GracefulShutdownHandler:
     def __init__(self):
