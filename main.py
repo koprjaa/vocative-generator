@@ -29,6 +29,19 @@ from src.utils import GracefulShutdownHandler, create_aiohttp_session
 logging.config.dictConfig(LOGGING_CONFIG)
 logger = logging.getLogger(__name__)
 
+# The output column order. The header and every appended chunk are written from
+# this one list. An input CSV without an ID column gets one appended at the end,
+# so the frame's own column order does not match the header and writing it as-is
+# put the name under ID and the ID under the name.
+OUTPUT_COLUMNS = [
+    'ID',
+    FILE_CONFIG['INPUT_COLUMN_NAME'],
+    'Vocative',
+    'Vocative First Name',
+    'Vocative Last Name',
+    'Error',
+]
+
 
 def _ensure_input_csv_or_dummy(input_file: str) -> None:
     if Path(input_file).exists():
@@ -68,7 +81,7 @@ def _estimate_total_csv_rows(input_file: str) -> int:
 def _initialize_output_csv_for_run(checkpoint_service: CheckpointService, output_file: str) -> None:
     if checkpoint_service.last_chunk_fully_processed_index == -1 and checkpoint_service.last_batch_completed_for_current_chunk == 0:
         logger.info(f"Creating new output file {output_file} with headers.")
-        pd.DataFrame(columns=['ID', FILE_CONFIG['INPUT_COLUMN_NAME'], 'Vocative', 'Vocative First Name', 'Vocative Last Name', 'Error']).to_csv(output_file, index=False, encoding='utf-8')
+        pd.DataFrame(columns=OUTPUT_COLUMNS).to_csv(output_file, index=False, encoding='utf-8')
         return
     logger.info(f"Appending to existing output file {output_file} or resuming.")
 
@@ -122,10 +135,13 @@ async def _process_one_input_chunk(
 
     await batch_service.process_chunk_data(chunk_df, current_chunk_index)
 
-    if shutdown_handler.shutdown_requested or checkpoint_service.last_chunk_fully_processed_index < current_chunk_index:
-        logger.info(f"Appending processed chunk {current_chunk_index} to {output_file}...")
-        chunk_df.to_csv(output_file, mode='a', header=False, index=False, encoding='utf-8')
-        logger.info(f"Chunk {current_chunk_index} successfully appended.")
+    # Unconditional on purpose. A chunk that was written by an earlier run returns
+    # at the guard above, so anything reaching this line was just processed and has
+    # to be written. Guarding it on the checkpoint index instead meant a clean run
+    # never wrote anything, because process_chunk_data advances that index first.
+    logger.info(f"Appending processed chunk {current_chunk_index} to {output_file}...")
+    chunk_df[OUTPUT_COLUMNS].to_csv(output_file, mode='a', header=False, index=False, encoding='utf-8')
+    logger.info(f"Chunk {current_chunk_index} successfully appended.")
 
     total_processed_rows += len(chunk_df)
 
