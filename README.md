@@ -37,12 +37,15 @@ Press Ctrl+C to stop. The next run reads `checkpoint.json` and skips every name 
 ```
 main.py             Reads CHUNK_SIZE rows from the CSV and calls BatchService.
 BatchService        Splits the chunk into batches and skips finished names.
-NameService         One request per name with aiohttp and BeautifulSoup, with retry and backoff.
+NameService         One request per name with aiohttp, with retry and backoff.
 CheckpointService   Writes every processed name and result to checkpoint.json.
-AdaptiveDelay       Tunes delay, worker count, and batch size from recent success rates.
+src/parsing.py      Reads the vocative out of a results page.
+src/adapters.py     One tunable number, used for the delay, the workers and the batch size.
 ```
 
-Backoff works on two levels. `NameService` grows the wait on 429, 5xx, and connection errors. The adapters tune the whole pipeline from the batch success rate, with thresholds at 0.95 and 0.8.
+Backoff works on two levels. `NameService` grows the wait on 429, 5xx, and connection errors. Three `AdaptiveValue` instances tune the pipeline from the recent success rate.
+
+Each one holds a number between a floor and a ceiling and a table of bands. The first band the success rate reaches decides the multiplier, and a factor of 1.0 holds the value still. That middle band matters: without it the value would react to every wobble around a threshold. The delay shortens on a clean run and lengthens on a bad one, the workers and the batch size move the other way.
 
 Three decisions are worth stating.
 
@@ -56,8 +59,18 @@ The signal handler falls back to `signal.signal()` on Windows, because the Proac
 
 - The parser depends on the HTML of sklonuj.cz. A markup change breaks it.
 - `checkpoint.json` grows with the dataset. At tens of millions of names the serialization cost per flush becomes significant.
-- No tests. Check `names_with_vocative.csv` against known forms by hand.
-- Several adaptive thresholds in `src/adapters.py` are fixed numbers with no calibration behind them.
+- The adaptive bands in `src/adapters.py` are fixed numbers. They come from watching the site rather than from measurement.
+- The parser takes the first data row of the results table. A layout change that reorders the cases would return the wrong form rather than nothing.
+
+## Development
+
+```bash
+uv run --extra dev ruff check .
+uv run --extra dev pytest -q
+```
+
+The suite covers the parsing and the adaptive bands and reaches no network. CI
+runs both on Python 3.10, 3.11, and 3.12, across Linux and Windows.
 
 ## License
 
