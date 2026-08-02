@@ -1,56 +1,62 @@
 # vocative-generator
 
-**Batch-declines Czech first names into the vocative case by automating sklonuj.cz — async aiohttp, pandas chunks, resumable checkpoints.**
+Converts Czech first names into the vocative case in bulk. It automates the form at [sklonuj.cz](https://sklonuj.cz/) with aiohttp, reads the input in pandas chunks, and writes a checkpoint so a stopped run can continue.
 
 ![python](https://img.shields.io/badge/python-3.10+-3776AB?style=flat-square&logo=python&logoColor=white)
 ![license](https://img.shields.io/badge/license-MIT-A31F34?style=flat-square)
 ![status](https://img.shields.io/badge/status-active-22863A?style=flat-square)
-![aiohttp](https://img.shields.io/badge/aiohttp-3.9-2C5BB4?style=flat-square)
-![pandas](https://img.shields.io/badge/pandas-2.2-150458?style=flat-square&logo=pandas&logoColor=white)
-![beautifulsoup4](https://img.shields.io/badge/bs4-4.12-777?style=flat-square)
 
-Czech is a heavily-inflected language and the vocative ("Hello **Jene**", not "Hello **Jan**") is a correctness requirement for any personalised email, CRM, or DB-driven customer communication. There's no clean public API, so this tool scripts the form at [sklonuj.cz](https://sklonuj.cz/): GET session cookies, POST `inpJmena=<name>`, parse the vocative cell out of the returned HTML table.
+## What it does
 
-Runs it at scale: pandas chunked reads, a shared aiohttp session, configurable worker semaphore, adaptive delay/concurrency/batch-size based on per-batch success rates, and a JSON checkpoint that allows resuming after `Ctrl+C` without re-requesting anything.
+Czech inflects names. A personalized email says "Hello Jene", not "Hello Jan". Any CRM or mail campaign that addresses Czech customers needs the vocative form. No clean public API exists, so this tool drives the sklonuj.cz form: it gets the session cookies, posts `inpJmena=<name>`, and reads the vocative cell out of the returned HTML table.
 
-## Run
+## Install
 
 ```bash
 uv venv
 uv pip install -r requirements.txt
-# put names into names.csv with a column matching INPUT_COLUMN_NAME (default 'Name')
+```
+
+## Use
+
+Put the names into `names.csv` in a column that matches `INPUT_COLUMN_NAME`. The default column name is `Name`.
+
+```bash
 python main.py
 ```
 
-If `names.csv` is missing, `main.py` generates a small dummy so the pipeline still runs end-to-end.
+If `names.csv` does not exist, `main.py` writes a small sample file so the pipeline still runs end to end.
 
-Output lands in `names_with_vocative.csv` with columns for the vocative text and the split first/last fragments.
+The result goes to `names_with_vocative.csv`. It holds the vocative text and the split first and last name parts.
 
-## Architecture
+Press Ctrl+C to stop. The next run reads `checkpoint.json` and skips every name it already processed.
+
+## How it works
 
 ```
-main.py           → reads CHUNK_SIZE rows from CSV, delegates to BatchService
-BatchService      → splits chunk into AdaptiveBatchSize batches, skips already-done names
-NameService       → one request per name via aiohttp + BeautifulSoup, with per-name retry/backoff
-CheckpointService → persists every processed (name → result) pair to checkpoint.json
-AdaptiveDelay/Workers/BatchSize → tune the three knobs based on recent success ratios
+main.py             Reads CHUNK_SIZE rows from the CSV and calls BatchService.
+BatchService        Splits the chunk into batches and skips finished names.
+NameService         One request per name with aiohttp and BeautifulSoup, with retry and backoff.
+CheckpointService   Writes every processed name and result to checkpoint.json.
+AdaptiveDelay       Tunes delay, worker count, and batch size from recent success rates.
 ```
 
-Two layers of backoff: `NameService` scales waits on 429/5xx/connection errors, while the adapters tune the whole pipeline's aggressiveness based on batch-level success rates (thresholds at 0.95 and 0.8).
+Backoff works on two levels. `NameService` grows the wait on 429, 5xx, and connection errors. The adapters tune the whole pipeline from the batch success rate, with thresholds at 0.95 and 0.8.
 
-## Key design choices
+Three decisions are worth stating.
 
-- **aiohttp over requests** — hundreds of small round-trips to one host dominate total time, and async wins there.
-- **Chunked pandas reads** bound memory on multi-million-row CSVs while the checkpoint serves as a global deduplication map across chunks.
-- **User-Agent rotation** from a config list, set per request; the aiohttp session is constructed without the default UA.
-- **Runs on Windows too** — signal handler registration has a fallback for the Windows ProactorEventLoop which doesn't support `add_signal_handler` (ships a `signal.signal()` path for SIGINT).
+1. aiohttp instead of requests. Hundreds of small round trips to one host dominate the run time, and async wins there.
+2. Chunked pandas reads bound the memory use on files with millions of rows. The checkpoint acts as the deduplication map across chunks.
+3. The tool rotates the User-Agent from a config list and builds the aiohttp session without the default agent.
 
-## Known limits
+The signal handler falls back to `signal.signal()` on Windows, because the ProactorEventLoop does not support `add_signal_handler`.
 
-- Depends entirely on sklonuj.cz's HTML structure. Markup change = the scraper breaks.
-- The checkpoint JSON grows linearly with the dataset — for tens of millions of names the per-flush serialization cost becomes non-trivial.
-- No tests. Validation is manual: spot-check `names_with_vocative.csv` against known declensions.
-- Several adaptive thresholds are magic numbers in `src/adapters.py` without external calibration.
+## Limits
+
+- The parser depends on the HTML of sklonuj.cz. A markup change breaks it.
+- `checkpoint.json` grows with the dataset. At tens of millions of names the serialization cost per flush becomes significant.
+- No tests. Check `names_with_vocative.csv` against known forms by hand.
+- Several adaptive thresholds in `src/adapters.py` are fixed numbers with no calibration behind them.
 
 ## License
 
