@@ -1,3 +1,17 @@
+#
+# Project: vocative-generator
+# File:    test_parsing.py
+#
+# Description:
+# Tests for reading the vocative out of a sklonuj.cz results page.
+#
+# Author:
+# Jan Alexandr Kopřiva
+# jan.alexandr.kopriva@gmail.com
+#
+# License: MIT
+#
+
 """Tests for reading the vocative out of a sklonuj.cz results page.
 
 The markup follows the real page: a results table whose first data row holds the

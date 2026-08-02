@@ -1,16 +1,16 @@
-# Project: Vocative Generator
-# File:    src/services.py
+#
+# Project: vocative-generator
+# File:    services.py
 #
 # Description:
-# Owns checkpoint JSON persistence, the sklonuj.cz HTML form client, and chunked batch scheduling with adaptive concurrency.
+# Checkpoint persistence, the sklonuj.cz form client, and the chunked batch scheduling.
 #
 # Author:
 # Jan Alexandr Kopřiva
 # jan.alexandr.kopriva@gmail.com
 #
-# Created: 2025-11-01
-#
 # License: MIT
+#
 
 import asyncio
 import json

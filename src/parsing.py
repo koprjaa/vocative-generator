@@ -1,5 +1,6 @@
-# Project: Vocative Generator
-# File:    src/parsing.py
+#
+# Project: vocative-generator
+# File:    parsing.py
 #
 # Description:
 # Reads the vocative form out of a sklonuj.cz results page.
@@ -9,6 +10,7 @@
 # jan.alexandr.kopriva@gmail.com
 #
 # License: MIT
+#
 
 from bs4 import BeautifulSoup
 

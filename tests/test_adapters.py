@@ -1,3 +1,17 @@
+#
+# Project: vocative-generator
+# File:    test_adapters.py
+#
+# Description:
+# Tests for the value the pipeline tunes from recent success rates.
+#
+# Author:
+# Jan Alexandr Kopřiva
+# jan.alexandr.kopriva@gmail.com
+#
+# License: MIT
+#
+
 """Tests for the value the pipeline tunes from recent success rates.
 
 One class drives the request delay, the worker ceiling and the batch size. They

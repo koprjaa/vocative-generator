@@ -1,16 +1,16 @@
-# Project: Vocative Generator
-# File:    src/models.py
+#
+# Project: vocative-generator
+# File:    models.py
 #
 # Description:
-# Defines NameResult, the typed record of a single name's vocative form, optional split name parts, success flag, and errors.
+# NameResult, the record of one name: its vocative form, its parts, and any error.
 #
 # Author:
 # Jan Alexandr Kopřiva
 # jan.alexandr.kopriva@gmail.com
 #
-# Created: 2025-12-14
-#
 # License: MIT
+#
 
 from dataclasses import dataclass
 

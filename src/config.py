@@ -1,17 +1,16 @@
-# Project: Vocative Generator
-# File:    src/config.py
+#
+# Project: vocative-generator
+# File:    config.py
 #
 # Description:
-# Centralizes logging dictConfig, HTTP and backoff tuning, browser user-agents, sklonuj.cz URL, and default CSV filenames.
+# Logging setup, HTTP and backoff tuning, the sklonuj.cz URL, and the default file names.
 #
 # Author:
 # Jan Alexandr Kopřiva
 # jan.alexandr.kopriva@gmail.com
 #
-# Created: 2025-12-14
-#
 # License: MIT
-
+#
 
 LOGGING_CONFIG = {
     'version': 1,

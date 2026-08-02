@@ -1,16 +1,16 @@
-# Project: Vocative Generator
-# File:    src/utils.py
+#
+# Project: vocative-generator
+# File:    utils.py
 #
 # Description:
-# Implements SIGINT/SIGTERM-driven shutdown coordination and builds the aiohttp ClientSession used for sklonuj.cz requests.
+# Shutdown handling for SIGINT and SIGTERM, and the aiohttp session used for the requests.
 #
 # Author:
 # Jan Alexandr Kopřiva
 # jan.alexandr.kopriva@gmail.com
 #
-# Created: 2025-12-14
-#
 # License: MIT
+#
 
 import asyncio
 import logging

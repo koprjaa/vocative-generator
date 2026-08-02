@@ -1,17 +1,16 @@
-# Project: Vocative Generator
-# File:    src/adapters.py
+#
+# Project: vocative-generator
+# File:    adapters.py
 #
 # Description:
-# One number that moves between bounds as the recent success rate changes.
-# Used for the delay between requests, the worker ceiling and the batch size.
+# One number that moves between a floor and a ceiling as the recent success rate changes. Used for the request delay, the worker count, and the batch size.
 #
 # Author:
 # Jan Alexandr Kopřiva
 # jan.alexandr.kopriva@gmail.com
 #
-# Created: 2025-12-14
-#
 # License: MIT
+#
 
 import asyncio
 import logging

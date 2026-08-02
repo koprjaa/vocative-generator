@@ -1,16 +1,16 @@
-# Project: Vocative Generator
+#
+# Project: vocative-generator
 # File:    main.py
 #
 # Description:
-# Orchestrates chunked CSV ingestion, adaptive batch processing, checkpoint persistence, and graceful shutdown for bulk vocative generation.
+# Reads the input CSV in chunks, runs the batches, saves checkpoints, and shuts down cleanly on a signal.
 #
 # Author:
 # Jan Alexandr Kopřiva
 # jan.alexandr.kopriva@gmail.com
 #
-# Created: 2025-11-01
-#
 # License: MIT
+#
 
 import asyncio
 import logging
