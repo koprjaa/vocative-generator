@@ -13,6 +13,7 @@
 #
 
 import asyncio
+import hashlib
 import json
 import logging
 import random
@@ -29,9 +30,28 @@ from .models import NameResult
 from .parsing import extract_vocative
 
 
+def fingerprint_input(input_file: str | Path) -> str | None:
+    """Content hash of the input file, or None when it is not there yet.
+
+    A checkpoint records how far a run got as a chunk number. Chunk numbers mean
+    nothing on their own: point the tool at a different file and chunk 0 of that
+    file is reported as already processed. Tying the checkpoint to the bytes it
+    was built from is what makes resuming safe.
+    """
+    path = Path(input_file)
+    if not path.exists():
+        return None
+    digest = hashlib.sha256()
+    with path.open('rb') as f:
+        for block in iter(lambda: f.read(1024 * 1024), b''):
+            digest.update(block)
+    return digest.hexdigest()
+
+
 class CheckpointService:
-    def __init__(self):
+    def __init__(self, input_file: str | Path | None = None):
         self.checkpoint_file = Path(FILE_CONFIG['CHECKPOINT_FILE'])
+        self.input_fingerprint = fingerprint_input(input_file or FILE_CONFIG['INPUT_FILE'])
         self.processed_names: dict[str, dict[str, str]] = {}
         self.last_batch_completed_for_current_chunk = 0
         self.last_chunk_fully_processed_index = -1
@@ -43,11 +63,22 @@ class CheckpointService:
             if self.checkpoint_file.exists():
                 with self.checkpoint_file.open(encoding='utf-8') as f:
                     data = json.load(f)
-                    self.processed_names = data.get('processed_names', {})
-                    self.last_batch_completed_for_current_chunk = data.get(
-                        'last_batch_completed_for_current_chunk', data.get('last_batch', 0)
+
+                stored = data.get('input_fingerprint')
+                if stored != self.input_fingerprint:
+                    # Either the input changed or the checkpoint predates this
+                    # field. Resuming would skip work that was never done.
+                    self.logger.warning(
+                        "Checkpoint was built from a different input file. Starting from "
+                        "the beginning and leaving %s alone.", self.checkpoint_file
                     )
-                    self.last_chunk_fully_processed_index = data.get('last_chunk_fully_processed_index', -1)
+                    return
+
+                self.processed_names = data.get('processed_names', {})
+                self.last_batch_completed_for_current_chunk = data.get(
+                    'last_batch_completed_for_current_chunk', data.get('last_batch', 0)
+                )
+                self.last_chunk_fully_processed_index = data.get('last_chunk_fully_processed_index', -1)
                 self.logger.info(f"Checkpoint loaded: {len(self.processed_names)} processed names, "
                                  f"last_chunk_idx: {self.last_chunk_fully_processed_index}, "
                                  f"last_batch_in_chunk: {self.last_batch_completed_for_current_chunk}")
@@ -73,6 +104,7 @@ class CheckpointService:
                     self.processed_names[name_key] = data_val
 
             data_to_save = {
+                'input_fingerprint': self.input_fingerprint,
                 'last_chunk_fully_processed_index': self.last_chunk_fully_processed_index,
                 'last_batch_completed_for_current_chunk': self.last_batch_completed_for_current_chunk,
                 'processed_names': self.processed_names
