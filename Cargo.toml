@@ -1,0 +1,23 @@
+[package]
+name = "vocative-generator"
+version = "1.0.0"
+edition = "2021"
+authors = ["Jan Alexandr Kopřiva <jan.alexandr.kopriva@gmail.com>"]
+description = "Convert Czech first names into the vocative case in bulk."
+license = "MIT"
+repository = "https://github.com/koprjaa/vocative-generator"
+
+[dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "time", "sync"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "cookies", "gzip", "deflate", "brotli", "charset"] }
+scraper = "0.24"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+csv = "1"
+sha2 = "0.10"
+rand = "0.9"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+
+[dev-dependencies]
+tempfile = "3"
+wiremock = "0.6"

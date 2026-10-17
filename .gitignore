@@ -1,4 +1,16 @@
-# Python
+/target/
+/names.csv
+/names_with_vocative.csv
+/checkpoint.json
+*.tmp
+*.log
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
 __pycache__/
 *.py[cod]
 *$py.class
@@ -19,32 +31,12 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
-
-# Virtual Environment
 venv/
 env/
 ENV/
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# Project specific
 *.csv
 !jmena.csv.example
 checkpoint.json
-*.log
-*.tmp
-
-# OS
-.DS_Store
-Thumbs.db
-
-
-# Tooling caches
 .pytest_cache/
 .ruff_cache/
 uv.lock
