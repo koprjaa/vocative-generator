@@ -25,7 +25,7 @@ class NameResult:
     error_message: str | None = None
 
     @classmethod
-    def from_vocative(cls, original_name: str, vocative: str) -> 'NameResult':
+    def from_vocative(cls, original_name: str, vocative: str) -> "NameResult":
         first_name, surname = cls.split_vocative(vocative)
         # Empty or unchanged surface form counts as failure for downstream metrics.
         success = bool(vocative and vocative.strip().lower() != original_name.strip().lower())
@@ -34,18 +34,18 @@ class NameResult:
             vocative=vocative.strip() if vocative else original_name,
             first_name=first_name,
             surname=surname,
-            success=success
+            success=success,
         )
 
     @classmethod
-    def error(cls, original_name: str, error_message: str) -> 'NameResult':
+    def error(cls, original_name: str, error_message: str) -> "NameResult":
         return cls(
             original_name=original_name,
             vocative=original_name,
-            first_name='',
-            surname='',
+            first_name="",
+            surname="",
             success=False,
-            error_message=error_message
+            error_message=error_message,
         )
 
     @staticmethod

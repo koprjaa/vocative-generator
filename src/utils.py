@@ -31,25 +31,23 @@ class GracefulShutdownHandler:
 
     def handle_signal(self, signum, frame):
         if not self.shutdown_requested:
-            self.logger.warning(f"Received signal {signal.Signals(signum).name}. Requesting graceful shutdown...")
+            self.logger.warning(
+                f"Received signal {signal.Signals(signum).name}. Requesting graceful shutdown..."
+            )
             self.shutdown_requested = True
             self.shutdown_event.set()
         else:
             self.logger.warning("Shutdown already in progress.")
 
+
 @asynccontextmanager
 async def create_aiohttp_session():
     # Pool sized for peak concurrency; traffic is single-host so per-host cap matches worker cap.
-    connector = TCPConnector(
-        limit=HTTP_CONFIG['MAX_WORKERS'] * 2,
-        limit_per_host=HTTP_CONFIG['MAX_WORKERS']
-    )
+    connector = TCPConnector(limit=HTTP_CONFIG["MAX_WORKERS"] * 2, limit_per_host=HTTP_CONFIG["MAX_WORKERS"])
     # Session-level ceiling slightly above NameService per-request timeout to avoid races on slow responses.
-    timeout_config = ClientTimeout(total=HTTP_CONFIG['TIMEOUT'] + 5)
+    timeout_config = ClientTimeout(total=HTTP_CONFIG["TIMEOUT"] + 5)
 
     async with aiohttp.ClientSession(
-        connector=connector,
-        timeout=timeout_config,
-        skip_auto_headers=['User-Agent']
+        connector=connector, timeout=timeout_config, skip_auto_headers=["User-Agent"]
     ) as session:
         yield session

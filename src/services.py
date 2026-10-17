@@ -42,16 +42,16 @@ def fingerprint_input(input_file: str | Path) -> str | None:
     if not path.exists():
         return None
     digest = hashlib.sha256()
-    with path.open('rb') as f:
-        for block in iter(lambda: f.read(1024 * 1024), b''):
+    with path.open("rb") as f:
+        for block in iter(lambda: f.read(1024 * 1024), b""):
             digest.update(block)
     return digest.hexdigest()
 
 
 class CheckpointService:
     def __init__(self, input_file: str | Path | None = None):
-        self.checkpoint_file = Path(FILE_CONFIG['CHECKPOINT_FILE'])
-        self.input_fingerprint = fingerprint_input(input_file or FILE_CONFIG['INPUT_FILE'])
+        self.checkpoint_file = Path(FILE_CONFIG["CHECKPOINT_FILE"])
+        self.input_fingerprint = fingerprint_input(input_file or FILE_CONFIG["INPUT_FILE"])
         self.processed_names: dict[str, dict[str, str]] = {}
         self.last_batch_completed_for_current_chunk = 0
         self.last_chunk_fully_processed_index = -1
@@ -61,27 +61,30 @@ class CheckpointService:
     def _load_checkpoint(self) -> None:
         try:
             if self.checkpoint_file.exists():
-                with self.checkpoint_file.open(encoding='utf-8') as f:
+                with self.checkpoint_file.open(encoding="utf-8") as f:
                     data = json.load(f)
 
-                stored = data.get('input_fingerprint')
+                stored = data.get("input_fingerprint")
                 if stored != self.input_fingerprint:
                     # Either the input changed or the checkpoint predates this
                     # field. Resuming would skip work that was never done.
                     self.logger.warning(
                         "Checkpoint was built from a different input file. Starting from "
-                        "the beginning and leaving %s alone.", self.checkpoint_file
+                        "the beginning and leaving %s alone.",
+                        self.checkpoint_file,
                     )
                     return
 
-                self.processed_names = data.get('processed_names', {})
+                self.processed_names = data.get("processed_names", {})
                 self.last_batch_completed_for_current_chunk = data.get(
-                    'last_batch_completed_for_current_chunk', data.get('last_batch', 0)
+                    "last_batch_completed_for_current_chunk", data.get("last_batch", 0)
                 )
-                self.last_chunk_fully_processed_index = data.get('last_chunk_fully_processed_index', -1)
-                self.logger.info(f"Checkpoint loaded: {len(self.processed_names)} processed names, "
-                                 f"last_chunk_idx: {self.last_chunk_fully_processed_index}, "
-                                 f"last_batch_in_chunk: {self.last_batch_completed_for_current_chunk}")
+                self.last_chunk_fully_processed_index = data.get("last_chunk_fully_processed_index", -1)
+                self.logger.info(
+                    f"Checkpoint loaded: {len(self.processed_names)} processed names, "
+                    f"last_chunk_idx: {self.last_chunk_fully_processed_index}, "
+                    f"last_batch_in_chunk: {self.last_batch_completed_for_current_chunk}"
+                )
         except Exception:
             self.logger.exception("Error loading checkpoint")
             self.processed_names = {}
@@ -94,36 +97,41 @@ class CheckpointService:
                 except OSError:
                     self.logger.exception("Could not remove corrupted checkpoint file")
 
-
-    def save_checkpoint(self, current_chunk_index: int, batch_number_in_chunk: int,
-                        processed_batch_data: dict[str, dict[str, str]],
-                        is_chunk_complete: bool) -> None:
+    def save_checkpoint(
+        self,
+        current_chunk_index: int,
+        batch_number_in_chunk: int,
+        processed_batch_data: dict[str, dict[str, str]],
+        is_chunk_complete: bool,
+    ) -> None:
         try:
             for name_key, data_val in processed_batch_data.items():
-                if name_key and data_val.get('vocative'):
+                if name_key and data_val.get("vocative"):
                     self.processed_names[name_key] = data_val
 
             data_to_save = {
-                'input_fingerprint': self.input_fingerprint,
-                'last_chunk_fully_processed_index': self.last_chunk_fully_processed_index,
-                'last_batch_completed_for_current_chunk': self.last_batch_completed_for_current_chunk,
-                'processed_names': self.processed_names
+                "input_fingerprint": self.input_fingerprint,
+                "last_chunk_fully_processed_index": self.last_chunk_fully_processed_index,
+                "last_batch_completed_for_current_chunk": self.last_batch_completed_for_current_chunk,
+                "processed_names": self.processed_names,
             }
 
             if is_chunk_complete:
-                data_to_save['last_chunk_fully_processed_index'] = current_chunk_index
-                data_to_save['last_batch_completed_for_current_chunk'] = 0
+                data_to_save["last_chunk_fully_processed_index"] = current_chunk_index
+                data_to_save["last_batch_completed_for_current_chunk"] = 0
             else:
                 # Mid-chunk: advance batch cursor only; chunk index becomes "complete" in a separate final save.
-                data_to_save['last_batch_completed_for_current_chunk'] = batch_number_in_chunk
+                data_to_save["last_batch_completed_for_current_chunk"] = batch_number_in_chunk
 
-            temp_checkpoint_file = self.checkpoint_file.with_suffix('.tmp')
-            with temp_checkpoint_file.open('w', encoding='utf-8') as f:
-                json.dump(data_to_save, f, ensure_ascii=False, separators=(',', ':'))
+            temp_checkpoint_file = self.checkpoint_file.with_suffix(".tmp")
+            with temp_checkpoint_file.open("w", encoding="utf-8") as f:
+                json.dump(data_to_save, f, ensure_ascii=False, separators=(",", ":"))
             temp_checkpoint_file.replace(self.checkpoint_file)
 
-            self.logger.info(f"Checkpoint saved. Chunk_idx: {current_chunk_index}, batch_in_chunk: {batch_number_in_chunk}, "
-                             f"is_chunk_complete: {is_chunk_complete}. Total processed: {len(self.processed_names)}.")
+            self.logger.info(
+                f"Checkpoint saved. Chunk_idx: {current_chunk_index}, batch_in_chunk: {batch_number_in_chunk}, "
+                f"is_chunk_complete: {is_chunk_complete}. Total processed: {len(self.processed_names)}."
+            )
 
             if is_chunk_complete:
                 self.last_chunk_fully_processed_index = current_chunk_index
@@ -134,7 +142,7 @@ class CheckpointService:
         except Exception:
             self.logger.exception("Error saving checkpoint")
 
-    def get_resume_info(self, current_chunk_index: int) -> tuple[int, dict[str, dict[str,str]]]:
+    def get_resume_info(self, current_chunk_index: int) -> tuple[int, dict[str, dict[str, str]]]:
         """(-1, {}) => chunk already finished; else (next batch index, global name cache)."""
         if current_chunk_index <= self.last_chunk_fully_processed_index:
             return -1, {}
@@ -144,7 +152,6 @@ class CheckpointService:
 
         # Checkpoint/file mismatch (e.g. truncated run): do not trust partial batch cursor.
         return 0, self.processed_names
-
 
     def get_globally_processed_name_data(self, name: str) -> dict[str, str] | None:
         return self.processed_names.get(name)
@@ -165,9 +172,9 @@ class CheckpointService:
 class NameService:
     def __init__(self, session: aiohttp.ClientSession):
         self.session = session
-        self.base_url = API_CONFIG['BASE_URL']
-        self.endpoint = API_CONFIG['ENDPOINT']
-        self.max_retries = HTTP_CONFIG['MAX_RETRIES']
+        self.base_url = API_CONFIG["BASE_URL"]
+        self.endpoint = API_CONFIG["ENDPOINT"]
+        self.max_retries = HTTP_CONFIG["MAX_RETRIES"]
         self.logger = logging.getLogger(self.__class__.__name__)
 
         self.current_request_cookies = {}
@@ -179,17 +186,17 @@ class NameService:
 
     def _get_headers(self) -> dict[str, str]:
         return {
-            'User-Agent': random.choice(USER_AGENTS),
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-            'Accept-Language': 'cs,en-US;q=0.7,en;q=0.3',
-            'Accept-Encoding': 'gzip, deflate, br',
-            'Connection': 'keep-alive',
-            'Upgrade-Insecure-Requests': '1',
-            'Sec-Fetch-Dest': 'document',
-            'Sec-Fetch-Mode': 'navigate',
-            'Sec-Fetch-Site': 'none',
-            'Sec-Fetch-User': '?1',
-            'Cache-Control': 'max-age=0',
+            "User-Agent": random.choice(USER_AGENTS),
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+            "Accept-Language": "cs,en-US;q=0.7,en;q=0.3",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Connection": "keep-alive",
+            "Upgrade-Insecure-Requests": "1",
+            "Sec-Fetch-Dest": "document",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Site": "none",
+            "Sec-Fetch-User": "?1",
+            "Cache-Control": "max-age=0",
         }
 
     async def _handle_rate_limit_or_server_error_delay(self, error_type: str, attempt: int) -> None:
@@ -197,17 +204,16 @@ class NameService:
         self.consecutive_successes_since_last_error = 0
         self.total_errors += 1
 
-        if error_type == 'rate_limit':
-            multiplier = HTTP_CONFIG['RATE_LIMIT_BACKOFF_MULTIPLIER']
-        elif error_type == 'server_error':
-            multiplier = HTTP_CONFIG['SERVER_ERROR_BACKOFF_MULTIPLIER']
+        if error_type == "rate_limit":
+            multiplier = HTTP_CONFIG["RATE_LIMIT_BACKOFF_MULTIPLIER"]
+        elif error_type == "server_error":
+            multiplier = HTTP_CONFIG["SERVER_ERROR_BACKOFF_MULTIPLIER"]
         else:  # connection_error
-            multiplier = HTTP_CONFIG['CONNECTION_ERROR_BACKOFF_MULTIPLIER']
+            multiplier = HTTP_CONFIG["CONNECTION_ERROR_BACKOFF_MULTIPLIER"]
 
         old_factor = self.global_backoff_factor
         self.global_backoff_factor = min(
-            self.global_backoff_factor * multiplier,
-            HTTP_CONFIG['RATE_LIMIT_MAX_GLOBAL_BACKOFF_FACTOR']
+            self.global_backoff_factor * multiplier, HTTP_CONFIG["RATE_LIMIT_MAX_GLOBAL_BACKOFF_FACTOR"]
         )
 
         if self.global_backoff_factor > old_factor:
@@ -217,7 +223,7 @@ class NameService:
                 f"({error_type}, attempt {attempt})"
             )
 
-        base_delay = HTTP_CONFIG['RATE_LIMIT_INITIAL_BACKOFF_SECONDS'] * self.global_backoff_factor
+        base_delay = HTTP_CONFIG["RATE_LIMIT_INITIAL_BACKOFF_SECONDS"] * self.global_backoff_factor
         jitter = random.uniform(0, 0.5 * base_delay)
         delay = base_delay + jitter
 
@@ -233,14 +239,15 @@ class NameService:
         self.consecutive_successes_since_last_error += 1
         self.total_requests += 1
 
-        if (current_time - self.last_backoff_factor_increase_time) < HTTP_CONFIG['COOLDOWN_AFTER_FACTOR_INCREASE_S']:
+        if (current_time - self.last_backoff_factor_increase_time) < HTTP_CONFIG[
+            "COOLDOWN_AFTER_FACTOR_INCREASE_S"
+        ]:
             return
 
-        if self.consecutive_successes_since_last_error >= HTTP_CONFIG['SUCCESSES_TO_REDUCE_BACKOFF']:
+        if self.consecutive_successes_since_last_error >= HTTP_CONFIG["SUCCESSES_TO_REDUCE_BACKOFF"]:
             old_factor = self.global_backoff_factor
             self.global_backoff_factor = max(
-                1.0,
-                self.global_backoff_factor * HTTP_CONFIG['BACKOFF_REDUCTION_ON_SUCCESS_RATIO']
+                1.0, self.global_backoff_factor * HTTP_CONFIG["BACKOFF_REDUCTION_ON_SUCCESS_RATIO"]
             )
 
             if self.global_backoff_factor < old_factor:
@@ -255,11 +262,11 @@ class NameService:
                 self.logger.debug(f"GET {url} status: {response_get.status} (Attempt: {attempt})")
 
                 if response_get.status == 429:
-                    await self._handle_rate_limit_or_server_error_delay('rate_limit', attempt)
+                    await self._handle_rate_limit_or_server_error_delay("rate_limit", attempt)
                     return False
 
                 if response_get.status >= 500:
-                    await self._handle_rate_limit_or_server_error_delay('server_error', attempt)
+                    await self._handle_rate_limit_or_server_error_delay("server_error", attempt)
                     return False
 
                 response_get.raise_for_status()
@@ -268,7 +275,7 @@ class NameService:
 
         except asyncio.TimeoutError:
             self.logger.warning(f"Timeout on GET {url} (Attempt: {attempt}).")
-            await self._handle_rate_limit_or_server_error_delay('connection_error', attempt)
+            await self._handle_rate_limit_or_server_error_delay("connection_error", attempt)
             return False
 
         except aiohttp.ClientResponseError as e:
@@ -278,31 +285,41 @@ class NameService:
 
         except aiohttp.ClientError as e:
             self.logger.warning(f"ClientError on GET {url}: {e} (Attempt: {attempt}).")
-            await self._handle_rate_limit_or_server_error_delay('connection_error', attempt)
+            await self._handle_rate_limit_or_server_error_delay("connection_error", attempt)
             return False
 
-    async def _submit_form_and_get_vocative(self, url: str, headers: dict[str, str], name: str, attempt: int) -> str | None:
+    async def _submit_form_and_get_vocative(
+        self, url: str, headers: dict[str, str], name: str, attempt: int
+    ) -> str | None:
         post_headers = headers.copy()
-        post_headers.update({
-            'Content-Type': 'application/x-www-form-urlencoded',
-            'Origin': self.base_url,
-            'Referer': url,
-            'Sec-Fetch-Site': 'same-origin',
-        })
+        post_headers.update(
+            {
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Origin": self.base_url,
+                "Referer": url,
+                "Sec-Fetch-Site": "same-origin",
+            }
+        )
         if self.current_request_cookies:
-            post_headers['Cookie'] = '; '.join([f"{k}={v.value}" for k, v in self.current_request_cookies.items()])
+            post_headers["Cookie"] = "; ".join(
+                [f"{k}={v.value}" for k, v in self.current_request_cookies.items()]
+            )
 
-        data = {'inpJmena': name}
+        data = {"inpJmena": name}
         try:
-            async with self.session.post(url, data=data, headers=post_headers, cookies=self.current_request_cookies) as response_post:
-                self.logger.debug(f"POST {url} for '{name}' status: {response_post.status} (Attempt: {attempt})")
+            async with self.session.post(
+                url, data=data, headers=post_headers, cookies=self.current_request_cookies
+            ) as response_post:
+                self.logger.debug(
+                    f"POST {url} for '{name}' status: {response_post.status} (Attempt: {attempt})"
+                )
 
                 if response_post.status == 429:
-                    await self._handle_rate_limit_or_server_error_delay('rate_limit', attempt)
+                    await self._handle_rate_limit_or_server_error_delay("rate_limit", attempt)
                     return None
 
                 if response_post.status >= 500:
-                    await self._handle_rate_limit_or_server_error_delay('server_error', attempt)
+                    await self._handle_rate_limit_or_server_error_delay("server_error", attempt)
                     return None
 
                 response_post.raise_for_status()
@@ -314,7 +331,7 @@ class NameService:
 
         except asyncio.TimeoutError:
             self.logger.warning(f"Timeout on POST for '{name}' (Attempt: {attempt}).")
-            await self._handle_rate_limit_or_server_error_delay('connection_error', attempt)
+            await self._handle_rate_limit_or_server_error_delay("connection_error", attempt)
             return None
 
         except aiohttp.ClientResponseError as e:
@@ -324,7 +341,7 @@ class NameService:
 
         except aiohttp.ClientError as e:
             self.logger.warning(f"ClientError on POST for '{name}': {e} (Attempt: {attempt}).")
-            await self._handle_rate_limit_or_server_error_delay('connection_error', attempt)
+            await self._handle_rate_limit_or_server_error_delay("connection_error", attempt)
             return None
 
     def _extract_vocative(self, html: str, original_name: str) -> str:
@@ -333,7 +350,8 @@ class NameService:
         if not vocative:
             self.logger.warning(
                 "No vocative for '%s'. HTML preview (1000 chars):\n%s",
-                original_name, html[:1000],
+                original_name,
+                html[:1000],
             )
         return vocative
 
@@ -349,13 +367,13 @@ class NameService:
                 if not await self._get_form_and_cookies(url, base_headers, attempt):
                     if attempt <= self.max_retries:
                         continue
-                    return NameResult.error(name, f"Failed GET after {attempt-1} retries")
+                    return NameResult.error(name, f"Failed GET after {attempt - 1} retries")
 
                 vocative_result = await self._submit_form_and_get_vocative(url, base_headers, name, attempt)
                 if vocative_result is None:
                     if attempt <= self.max_retries:
                         continue
-                    return NameResult.error(name, f"Failed POST after {attempt-1} retries")
+                    return NameResult.error(name, f"Failed POST after {attempt - 1} retries")
 
                 self.logger.info(
                     f"Processed '{name}'. Vocative: '{vocative_result if vocative_result else '(empty)'}'. "
@@ -365,7 +383,9 @@ class NameService:
 
             except aiohttp.ClientResponseError as e:
                 if e.status in [401, 403]:
-                    self.logger.warning("Non-recoverable HTTP error for '%s': %s %s", name, e.status, e.message)
+                    self.logger.warning(
+                        "Non-recoverable HTTP error for '%s': %s %s", name, e.status, e.message
+                    )
                     return NameResult.error(name, f"HTTP {e.status}: {e.message}")
                 if attempt <= self.max_retries:
                     continue
@@ -379,9 +399,15 @@ class NameService:
 
 
 class BatchService:
-    def __init__(self, name_service: NameService, checkpoint_service: CheckpointService,
-                 delay_adapter: AdaptiveValue, worker_adapter: AdaptiveValue, batch_size_adapter: AdaptiveValue,
-                 shutdown_event: asyncio.Event):
+    def __init__(
+        self,
+        name_service: NameService,
+        checkpoint_service: CheckpointService,
+        delay_adapter: AdaptiveValue,
+        worker_adapter: AdaptiveValue,
+        batch_size_adapter: AdaptiveValue,
+        shutdown_event: asyncio.Event,
+    ):
         self.name_service = name_service
         self.checkpoint_service = checkpoint_service
         self.delay_adapter = delay_adapter
@@ -393,7 +419,7 @@ class BatchService:
         self.current_batch_successes = 0
         self.current_batch_errors = 0
 
-        self.checkpoint_interval = HTTP_CONFIG.get('CHECKPOINT_INTERVAL', 5)
+        self.checkpoint_interval = HTTP_CONFIG.get("CHECKPOINT_INTERVAL", 5)
         self.batches_since_last_checkpoint = 0
         self.pending_checkpoint_data = {}
 
@@ -415,7 +441,7 @@ class BatchService:
 
             self.logger.info(
                 f"Batch statistics: {self.current_batch_successes}/{total_requests} successful "
-                f"({success_rate*100:.1f}%). "
+                f"({success_rate * 100:.1f}%). "
                 f"Current delay: {self.delay_adapter.value:.2f}s, "
                 f"workers: {self.worker_adapter.value}, "
                 f"batch size: {self.batch_size_adapter.value}"
@@ -426,23 +452,25 @@ class BatchService:
         self.logger.info(f"Starting processing for chunk {chunk_index} with {len(df_chunk)} names.")
 
         self.df_chunk = df_chunk
-        self.name_to_idx_map = {name: i for i, name in df_chunk[FILE_CONFIG['INPUT_COLUMN_NAME']].items()}
+        self.name_to_idx_map = {name: i for i, name in df_chunk[FILE_CONFIG["INPUT_COLUMN_NAME"]].items()}
 
         last_completed_batch_in_chunk = self.checkpoint_service.get_resume_info(chunk_index)[0]
         if last_completed_batch_in_chunk == -1:
             self.logger.info(f"Chunk {chunk_index} already fully processed. Skipping.")
             return
 
-        all_names_in_chunk = df_chunk[FILE_CONFIG['INPUT_COLUMN_NAME']].tolist()
+        all_names_in_chunk = df_chunk[FILE_CONFIG["INPUT_COLUMN_NAME"]].tolist()
 
         initial_batch_size = self.batch_size_adapter.value
 
         batches_of_names = [
-            all_names_in_chunk[i:i + initial_batch_size]
+            all_names_in_chunk[i : i + initial_batch_size]
             for i in range(0, len(all_names_in_chunk), initial_batch_size)
         ]
         total_batches_in_chunk = len(batches_of_names)
-        self.logger.info(f"Chunk {chunk_index} split into {total_batches_in_chunk} batches of (up to) {initial_batch_size} names.")
+        self.logger.info(
+            f"Chunk {chunk_index} split into {total_batches_in_chunk} batches of (up to) {initial_batch_size} names."
+        )
 
         self.batches_since_last_checkpoint = 0
         self.pending_checkpoint_data = {}
@@ -457,7 +485,9 @@ class BatchService:
                 break
 
             if batch_number_for_display <= last_completed_batch_in_chunk:
-                self.logger.info(f"Skipping batch {batch_number_for_display}/{total_batches_in_chunk} in chunk {chunk_index} (already processed).")
+                self.logger.info(
+                    f"Skipping batch {batch_number_for_display}/{total_batches_in_chunk} in chunk {chunk_index} (already processed)."
+                )
                 processed_batches_count_in_chunk += 1
                 continue
 
@@ -467,76 +497,94 @@ class BatchService:
             for name_in_batch in current_batch_names_list:
                 processed_data = self.checkpoint_service.get_globally_processed_name_data(name_in_batch)
                 if processed_data:
-                    voc = processed_data.get('vocative', name_in_batch)
+                    voc = processed_data.get("vocative", name_in_batch)
                     batch_results_from_checkpoint.append(NameResult.from_vocative(name_in_batch, voc))
                 else:
                     names_needing_api_call.append(name_in_batch)
 
             if not names_needing_api_call:
-                self.logger.info(f"Batch {batch_number_for_display} (chunk {chunk_index}) fully processed from checkpoint.")
-                self._update_dataframe_with_results(df_chunk, batch_results_from_checkpoint, self.name_to_idx_map)
+                self.logger.info(
+                    f"Batch {batch_number_for_display} (chunk {chunk_index}) fully processed from checkpoint."
+                )
+                self._update_dataframe_with_results(
+                    df_chunk, batch_results_from_checkpoint, self.name_to_idx_map
+                )
                 checkpoint_data = {}
                 for r in batch_results_from_checkpoint:
                     if r.original_name in self.name_to_idx_map:
                         idx = self.name_to_idx_map[r.original_name]
-                        name_id = str(self.df_chunk.loc[idx, 'ID'])
-                        checkpoint_data[r.original_name] = {'vocative': r.vocative, 'id': name_id}
+                        name_id = str(self.df_chunk.loc[idx, "ID"])
+                        checkpoint_data[r.original_name] = {"vocative": r.vocative, "id": name_id}
 
                 self.pending_checkpoint_data.update(checkpoint_data)
                 self.batches_since_last_checkpoint += 1
 
                 should_save_checkpoint = (
-                    self.batches_since_last_checkpoint >= self.checkpoint_interval or
-                    batch_number_for_display == total_batches_in_chunk
+                    self.batches_since_last_checkpoint >= self.checkpoint_interval
+                    or batch_number_for_display == total_batches_in_chunk
                 )
 
                 if should_save_checkpoint and self.pending_checkpoint_data:
                     self.checkpoint_service.save_checkpoint(
-                        chunk_index, batch_number_for_display,
+                        chunk_index,
+                        batch_number_for_display,
                         self.pending_checkpoint_data,
-                        is_chunk_complete=False
+                        is_chunk_complete=False,
                     )
                     self.pending_checkpoint_data = {}
                     self.batches_since_last_checkpoint = 0
 
                 processed_batches_count_in_chunk += 1
-                self._log_batch_progress(processed_batches_count_in_chunk, total_batches_in_chunk, chunk_index, start_time_chunk)
+                self._log_batch_progress(
+                    processed_batches_count_in_chunk, total_batches_in_chunk, chunk_index, start_time_chunk
+                )
                 continue
 
-            self.logger.info(f"Preparing batch {batch_number_for_display}/{total_batches_in_chunk} (chunk {chunk_index}) "
-                             f"with {len(names_needing_api_call)} new names (total {len(current_batch_names_list)}).")
+            self.logger.info(
+                f"Preparing batch {batch_number_for_display}/{total_batches_in_chunk} (chunk {chunk_index}) "
+                f"with {len(names_needing_api_call)} new names (total {len(current_batch_names_list)})."
+            )
 
-            task = asyncio.create_task(self._process_single_batch(
-                names_to_process=names_needing_api_call,
-                batch_number=batch_number_for_display,
-                chunk_idx=chunk_index
-            ))
+            task = asyncio.create_task(
+                self._process_single_batch(
+                    names_to_process=names_needing_api_call,
+                    batch_number=batch_number_for_display,
+                    chunk_idx=chunk_index,
+                )
+            )
             tasks.add(task)
 
             shutdown_processing = False
-            while len(tasks) >= self.worker_adapter.value or \
-                  (batch_number_for_display == total_batches_in_chunk and tasks):
+            while len(tasks) >= self.worker_adapter.value or (
+                batch_number_for_display == total_batches_in_chunk and tasks
+            ):
                 if self.shutdown_event.is_set() and not shutdown_processing:
                     if tasks:
-                        self.logger.info(f"Shutdown requested, waiting for {len(tasks)} pending tasks to complete...")
+                        self.logger.info(
+                            f"Shutdown requested, waiting for {len(tasks)} pending tasks to complete..."
+                        )
                         shutdown_processing = True
                         try:
-                            completed_tasks, pending_tasks = await asyncio.wait(tasks, return_when=asyncio.ALL_COMPLETED, timeout=30)
+                            completed_tasks, pending_tasks = await asyncio.wait(
+                                tasks, return_when=asyncio.ALL_COMPLETED, timeout=30
+                            )
                             tasks = pending_tasks
                             for t in completed_tasks:
                                 try:
                                     api_results_for_batch: list[NameResult] = t.result()
                                     full_batch_results = batch_results_from_checkpoint + api_results_for_batch
-                                    self._update_dataframe_with_results(df_chunk, full_batch_results, self.name_to_idx_map)
+                                    self._update_dataframe_with_results(
+                                        df_chunk, full_batch_results, self.name_to_idx_map
+                                    )
 
                                     checkpoint_data_for_batch = {}
                                     for r_api in api_results_for_batch:
                                         if r_api.original_name in self.name_to_idx_map:
                                             idx = self.name_to_idx_map[r_api.original_name]
-                                            name_id = str(self.df_chunk.loc[idx, 'ID'])
+                                            name_id = str(self.df_chunk.loc[idx, "ID"])
                                             checkpoint_data_for_batch[r_api.original_name] = {
-                                                'vocative': r_api.vocative,
-                                                'id': name_id
+                                                "vocative": r_api.vocative,
+                                                "id": name_id,
                                             }
                                         if r_api.success:
                                             self.batch_size_adapter.record(True)
@@ -552,12 +600,16 @@ class BatchService:
                                 except Exception:  # noqa: PERF203 - one task per iteration, the cost is the await
                                     self.logger.exception("Error processing task during shutdown")
                         except asyncio.TimeoutError:
-                            self.logger.warning("Timeout waiting for tasks to complete during shutdown. Cancelling remaining tasks.")
+                            self.logger.warning(
+                                "Timeout waiting for tasks to complete during shutdown. Cancelling remaining tasks."
+                            )
                             for t in tasks:
                                 t.cancel()
                     break
 
-                completed_tasks, pending_tasks = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+                completed_tasks, pending_tasks = await asyncio.wait(
+                    tasks, return_when=asyncio.FIRST_COMPLETED
+                )
                 tasks = pending_tasks
 
                 for t in completed_tasks:
@@ -566,16 +618,18 @@ class BatchService:
 
                         full_batch_results = batch_results_from_checkpoint + api_results_for_batch
 
-                        self._update_dataframe_with_results(df_chunk, full_batch_results, self.name_to_idx_map)
+                        self._update_dataframe_with_results(
+                            df_chunk, full_batch_results, self.name_to_idx_map
+                        )
 
                         checkpoint_data_for_batch = {}
                         for r_api in api_results_for_batch:
                             if r_api.original_name in self.name_to_idx_map:
                                 idx = self.name_to_idx_map[r_api.original_name]
-                                name_id = str(self.df_chunk.loc[idx, 'ID'])
+                                name_id = str(self.df_chunk.loc[idx, "ID"])
                                 checkpoint_data_for_batch[r_api.original_name] = {
-                                    'vocative': r_api.vocative,
-                                    'id': name_id
+                                    "vocative": r_api.vocative,
+                                    "id": name_id,
                                 }
                             if r_api.success:
                                 self.batch_size_adapter.record(True)
@@ -595,18 +649,27 @@ class BatchService:
 
                         if should_save_checkpoint and self.pending_checkpoint_data:
                             # Task name holds the batch index; completions may finish out of submission order.
-                            batch_num_for_checkpoint = int(t.get_name()) if t.get_name().isdigit() else processed_batches_count_in_chunk + 1
+                            batch_num_for_checkpoint = (
+                                int(t.get_name())
+                                if t.get_name().isdigit()
+                                else processed_batches_count_in_chunk + 1
+                            )
                             self.checkpoint_service.save_checkpoint(
                                 chunk_index,
                                 batch_num_for_checkpoint,
                                 self.pending_checkpoint_data,
-                                is_chunk_complete=False
+                                is_chunk_complete=False,
                             )
                             self.pending_checkpoint_data = {}
                             self.batches_since_last_checkpoint = 0
 
                         processed_batches_count_in_chunk += 1
-                        self._log_batch_progress(processed_batches_count_in_chunk, total_batches_in_chunk, chunk_index, start_time_chunk)
+                        self._log_batch_progress(
+                            processed_batches_count_in_chunk,
+                            total_batches_in_chunk,
+                            chunk_index,
+                            start_time_chunk,
+                        )
 
                     except asyncio.CancelledError:  # noqa: PERF203 - one task per iteration
                         self.logger.warning(f"Task for batch (name: {t.get_name()}) was cancelled.")
@@ -625,7 +688,7 @@ class BatchService:
                     chunk_index,
                     batch_number_for_display,
                     self.pending_checkpoint_data,
-                    is_chunk_complete=False
+                    is_chunk_complete=False,
                 )
                 self.pending_checkpoint_data = {}
                 self.batches_since_last_checkpoint = 0
@@ -636,7 +699,7 @@ class BatchService:
                     chunk_index,
                     processed_batches_count_in_chunk,
                     self.pending_checkpoint_data,
-                    is_chunk_complete=False
+                    is_chunk_complete=False,
                 )
                 self.pending_checkpoint_data = {}
             self.checkpoint_service.save_checkpoint(chunk_index, 0, {}, is_chunk_complete=True)
@@ -644,28 +707,38 @@ class BatchService:
             self.logger.info(f"Chunk {chunk_index} fully processed and final checkpoint saved.")
         elif self.shutdown_event.is_set():
             if self.pending_checkpoint_data:
-                self.logger.info(f"Saving checkpoint before shutdown. Pending data: {len(self.pending_checkpoint_data)} names.")
+                self.logger.info(
+                    f"Saving checkpoint before shutdown. Pending data: {len(self.pending_checkpoint_data)} names."
+                )
                 self.checkpoint_service.save_checkpoint(
                     chunk_index,
                     processed_batches_count_in_chunk,
                     self.pending_checkpoint_data,
-                    is_chunk_complete=False
+                    is_chunk_complete=False,
                 )
                 self.pending_checkpoint_data = {}
                 self.logger.info("Checkpoint saved successfully before shutdown.")
-            self.logger.info(f"Chunk {chunk_index} processing interrupted by shutdown signal. "
-                             f"{processed_batches_count_in_chunk}/{total_batches_in_chunk} batches processed.")
+            self.logger.info(
+                f"Chunk {chunk_index} processing interrupted by shutdown signal. "
+                f"{processed_batches_count_in_chunk}/{total_batches_in_chunk} batches processed."
+            )
         else:
-            self.logger.warning(f"Chunk {chunk_index} processing finished, but not all batches completed. "
-                                f"Processed: {processed_batches_count_in_chunk}/{total_batches_in_chunk}.")
+            self.logger.warning(
+                f"Chunk {chunk_index} processing finished, but not all batches completed. "
+                f"Processed: {processed_batches_count_in_chunk}/{total_batches_in_chunk}."
+            )
 
-    async def _process_single_batch(self, names_to_process: list[str], batch_number: int, chunk_idx: int) -> list[NameResult]:
+    async def _process_single_batch(
+        self, names_to_process: list[str], batch_number: int, chunk_idx: int
+    ) -> list[NameResult]:
         asyncio.current_task().set_name(str(batch_number))
 
         results: list[NameResult] = []
         for name in names_to_process:
             if self.shutdown_event.is_set():
-                self.logger.info(f"Shutdown during batch {batch_number} (chunk {chunk_idx}), name '{name}'. Stopping batch.")
+                self.logger.info(
+                    f"Shutdown during batch {batch_number} (chunk {chunk_idx}), name '{name}'. Stopping batch."
+                )
                 break
 
             await self.delay_adapter.wait()
@@ -675,42 +748,48 @@ class BatchService:
         self._update_adaptive_mechanisms(results)
         return results
 
-    def _update_dataframe_with_results(self, df_chunk: pd.DataFrame, results: list[NameResult], name_to_idx_map: dict):
+    def _update_dataframe_with_results(
+        self, df_chunk: pd.DataFrame, results: list[NameResult], name_to_idx_map: dict
+    ):
         if not results:
             return
 
         update_data = {
-            'Vocative': [],
-            'Vocative First Name': [],
-            'Vocative Last Name': [],
-            'Error': [],
-            'indices': []
+            "Vocative": [],
+            "Vocative First Name": [],
+            "Vocative Last Name": [],
+            "Error": [],
+            "indices": [],
         }
 
         for res in results:
             if res.original_name in name_to_idx_map:
                 idx = name_to_idx_map[res.original_name]
-                update_data['indices'].append(idx)
-                update_data['Vocative'].append(res.vocative)
-                update_data['Vocative First Name'].append(res.first_name)
-                update_data['Vocative Last Name'].append(res.surname)
-                update_data['Error'].append(res.error_message if res.error_message else pd.NA)
+                update_data["indices"].append(idx)
+                update_data["Vocative"].append(res.vocative)
+                update_data["Vocative First Name"].append(res.first_name)
+                update_data["Vocative Last Name"].append(res.surname)
+                update_data["Error"].append(res.error_message if res.error_message else pd.NA)
             else:
-                self.logger.warning(f"Name '{res.original_name}' from results not found in current DataFrame chunk for update.")
+                self.logger.warning(
+                    f"Name '{res.original_name}' from results not found in current DataFrame chunk for update."
+                )
 
-        if not update_data['indices']:
+        if not update_data["indices"]:
             return
 
-        indices = update_data['indices']
-        df_chunk.loc[indices, 'Vocative'] = update_data['Vocative']
-        df_chunk.loc[indices, 'Vocative First Name'] = update_data['Vocative First Name']
-        df_chunk.loc[indices, 'Vocative Last Name'] = update_data['Vocative Last Name']
+        indices = update_data["indices"]
+        df_chunk.loc[indices, "Vocative"] = update_data["Vocative"]
+        df_chunk.loc[indices, "Vocative First Name"] = update_data["Vocative First Name"]
+        df_chunk.loc[indices, "Vocative Last Name"] = update_data["Vocative Last Name"]
 
-        if 'Error' not in df_chunk.columns:
-            df_chunk['Error'] = pd.NA
-        df_chunk.loc[indices, 'Error'] = update_data['Error']
+        if "Error" not in df_chunk.columns:
+            df_chunk["Error"] = pd.NA
+        df_chunk.loc[indices, "Error"] = update_data["Error"]
 
-    def _log_batch_progress(self, completed_in_chunk: int, total_in_chunk: int, chunk_idx:int, chunk_start_time: float):
+    def _log_batch_progress(
+        self, completed_in_chunk: int, total_in_chunk: int, chunk_idx: int, chunk_start_time: float
+    ):
         progress = (completed_in_chunk / total_in_chunk) * 100 if total_in_chunk > 0 else 0
         elapsed_chunk = time.time() - chunk_start_time
         speed_batch_per_s = completed_in_chunk / elapsed_chunk if elapsed_chunk > 0 else 0

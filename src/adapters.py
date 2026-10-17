@@ -51,9 +51,7 @@ class AdaptiveValue:
         self.bands = bands
         self.name = name
         self.integer = integer
-        self.interval = (
-            interval if interval is not None else HTTP_CONFIG.get("WORKER_SCALE_INTERVAL", 3.0)
-        )
+        self.interval = interval if interval is not None else HTTP_CONFIG.get("WORKER_SCALE_INTERVAL", 3.0)
         self.successes = 0
         self.errors = 0
         self.last_adjustment = time.time()
@@ -112,7 +110,10 @@ class AdaptiveValue:
         if previous != self.value:
             self.logger.info(
                 "%s adjusted: %s -> %s (success: %.1f%%)",
-                self.name, _format(previous), _format(self.value), success_rate * 100,
+                self.name,
+                _format(previous),
+                _format(self.value),
+                success_rate * 100,
             )
 
     async def wait(self) -> None:
@@ -133,7 +134,11 @@ BATCH_BANDS = [(0.95, 1.1), (0.75, 1.0), (0.0, 0.8)]
 
 def make_delay(initial: float, minimum: float, maximum: float) -> AdaptiveValue:
     return AdaptiveValue(
-        initial, minimum, maximum, DELAY_BANDS, "Delay",
+        initial,
+        minimum,
+        maximum,
+        DELAY_BANDS,
+        "Delay",
         interval=HTTP_CONFIG.get("WORKER_SCALE_INTERVAL", 1.0),
     )
 

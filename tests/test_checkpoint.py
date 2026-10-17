@@ -39,9 +39,7 @@ def workspace(tmp_path, monkeypatch):
 
 
 def write_input(workspace, names):
-    (workspace / "names.csv").write_text(
-        "Name\n" + "\n".join(names) + "\n", encoding="utf-8"
-    )
+    (workspace / "names.csv").write_text("Name\n" + "\n".join(names) + "\n", encoding="utf-8")
 
 
 def save_progress(service, chunk=0):

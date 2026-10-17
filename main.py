@@ -34,12 +34,12 @@ logger = logging.getLogger(__name__)
 # so the frame's own column order does not match the header and writing it as-is
 # put the name under ID and the ID under the name.
 OUTPUT_COLUMNS = [
-    'ID',
-    FILE_CONFIG['INPUT_COLUMN_NAME'],
-    'Vocative',
-    'Vocative First Name',
-    'Vocative Last Name',
-    'Error',
+    "ID",
+    FILE_CONFIG["INPUT_COLUMN_NAME"],
+    "Vocative",
+    "Vocative First Name",
+    "Vocative Last Name",
+    "Error",
 ]
 
 
@@ -48,21 +48,25 @@ def _ensure_input_csv_or_dummy(input_file: str) -> None:
         return
     logger.error(f"Input file {input_file} not found. Exiting.")
     logger.info(f"Creating dummy input file {input_file} for testing.")
-    pd.DataFrame({
-        'ID': range(1, 21),
-        FILE_CONFIG['INPUT_COLUMN_NAME']: [f'First Name Last Name {i}' for i in range(1, 21)],
-    }).to_csv(input_file, index=False, encoding='utf-8')
+    pd.DataFrame(
+        {
+            "ID": range(1, 21),
+            FILE_CONFIG["INPUT_COLUMN_NAME"]: [f"First Name Last Name {i}" for i in range(1, 21)],
+        }
+    ).to_csv(input_file, index=False, encoding="utf-8")
 
 
 def _persist_loaded_checkpoint_to_disk(checkpoint_service: CheckpointService) -> None:
     if not checkpoint_service.processed_names:
         return
-    logger.info(f"Flushing checkpoint before start: {len(checkpoint_service.processed_names)} processed names.")
+    logger.info(
+        f"Flushing checkpoint before start: {len(checkpoint_service.processed_names)} processed names."
+    )
     checkpoint_service.save_checkpoint(
         checkpoint_service.last_chunk_fully_processed_index,
         checkpoint_service.last_batch_completed_for_current_chunk,
         {},
-        is_chunk_complete=checkpoint_service.last_batch_completed_for_current_chunk == 0
+        is_chunk_complete=checkpoint_service.last_batch_completed_for_current_chunk == 0,
     )
     logger.info("Checkpoint flushed successfully before start.")
 
@@ -79,9 +83,12 @@ def _estimate_total_csv_rows(input_file: str) -> int:
 
 
 def _initialize_output_csv_for_run(checkpoint_service: CheckpointService, output_file: str) -> None:
-    if checkpoint_service.last_chunk_fully_processed_index == -1 and checkpoint_service.last_batch_completed_for_current_chunk == 0:
+    if (
+        checkpoint_service.last_chunk_fully_processed_index == -1
+        and checkpoint_service.last_batch_completed_for_current_chunk == 0
+    ):
         logger.info(f"Creating new output file {output_file} with headers.")
-        pd.DataFrame(columns=OUTPUT_COLUMNS).to_csv(output_file, index=False, encoding='utf-8')
+        pd.DataFrame(columns=OUTPUT_COLUMNS).to_csv(output_file, index=False, encoding="utf-8")
         return
     logger.info(f"Appending to existing output file {output_file} or resuming.")
 
@@ -106,30 +113,36 @@ async def _process_one_input_chunk(
         logger.info(f"Chunk {current_chunk_index} was already fully processed. Skipping.")
         return total_processed_rows + len(chunk_df), False
 
-    if FILE_CONFIG['INPUT_COLUMN_NAME'] not in chunk_df.columns:
-        logger.error(f"Chunk {current_chunk_index} does not contain '{FILE_CONFIG['INPUT_COLUMN_NAME']}' column. Skipping.")
+    if FILE_CONFIG["INPUT_COLUMN_NAME"] not in chunk_df.columns:
+        logger.error(
+            f"Chunk {current_chunk_index} does not contain '{FILE_CONFIG['INPUT_COLUMN_NAME']}' column. Skipping."
+        )
         return total_processed_rows, False
 
-    if 'ID' not in chunk_df.columns:
-        logger.warning(f"Chunk {current_chunk_index} does not contain 'ID' column. Generating sequential IDs for this chunk.")
-        chunk_df['ID'] = range(total_processed_rows + 1, total_processed_rows + len(chunk_df) + 1)
+    if "ID" not in chunk_df.columns:
+        logger.warning(
+            f"Chunk {current_chunk_index} does not contain 'ID' column. Generating sequential IDs for this chunk."
+        )
+        chunk_df["ID"] = range(total_processed_rows + 1, total_processed_rows + len(chunk_df) + 1)
 
     original_count_in_chunk = len(chunk_df)
-    name_col = FILE_CONFIG['INPUT_COLUMN_NAME']
+    name_col = FILE_CONFIG["INPUT_COLUMN_NAME"]
 
     chunk_df = chunk_df.dropna(subset=[name_col]).copy()
     chunk_df[name_col] = chunk_df[name_col].astype(str).str.strip()
-    chunk_df = chunk_df[chunk_df[name_col] != '']
+    chunk_df = chunk_df[chunk_df[name_col] != ""]
 
     cleaned_count_in_chunk = len(chunk_df)
     if original_count_in_chunk != cleaned_count_in_chunk:
-        logger.info(f"Cleaned chunk {current_chunk_index}: removed {original_count_in_chunk - cleaned_count_in_chunk} empty/NaN '{name_col}'s.")
+        logger.info(
+            f"Cleaned chunk {current_chunk_index}: removed {original_count_in_chunk - cleaned_count_in_chunk} empty/NaN '{name_col}'s."
+        )
 
     if cleaned_count_in_chunk == 0:
         logger.info(f"Chunk {current_chunk_index} is empty after cleaning. Skipping.")
         return total_processed_rows, False
 
-    for col in ['Vocative', 'Vocative First Name', 'Vocative Last Name', 'Error']:
+    for col in ["Vocative", "Vocative First Name", "Vocative Last Name", "Error"]:
         if col not in chunk_df.columns:
             chunk_df[col] = pd.NA
 
@@ -140,19 +153,21 @@ async def _process_one_input_chunk(
     # to be written. Guarding it on the checkpoint index instead meant a clean run
     # never wrote anything, because process_chunk_data advances that index first.
     logger.info(f"Appending processed chunk {current_chunk_index} to {output_file}...")
-    chunk_df[OUTPUT_COLUMNS].to_csv(output_file, mode='a', header=False, index=False, encoding='utf-8')
+    chunk_df[OUTPUT_COLUMNS].to_csv(output_file, mode="a", header=False, index=False, encoding="utf-8")
     logger.info(f"Chunk {current_chunk_index} successfully appended.")
 
     total_processed_rows += len(chunk_df)
 
     actual_success_count = (
-        chunk_df['Vocative'].notna()
-        & (chunk_df['Vocative'] != '')
-        & (chunk_df['Vocative'].str.lower() != chunk_df[name_col].str.lower())
+        chunk_df["Vocative"].notna()
+        & (chunk_df["Vocative"] != "")
+        & (chunk_df["Vocative"].str.lower() != chunk_df[name_col].str.lower())
     ).sum()
     logger.info(f"--- Chunk {current_chunk_index} Finished ---")
     logger.info(f"- Processed in chunk: {len(chunk_df):,} records")
-    logger.info(f"- Successfully transformed: {actual_success_count:,} names ({actual_success_count / len(chunk_df) * 100:.1f}%)")
+    logger.info(
+        f"- Successfully transformed: {actual_success_count:,} names ({actual_success_count / len(chunk_df) * 100:.1f}%)"
+    )
     if total_rows_in_file > 0:
         logger.info(
             f"- Overall progress: {total_processed_rows:,}/{total_rows_in_file:,} records "
@@ -190,7 +205,11 @@ def _log_main_task_result_if_finished(main_task: asyncio.Task, done: set) -> Non
 
 async def _cancel_all_outstanding_tasks(loop: asyncio.AbstractEventLoop) -> None:
     logger.info("Main_wrapper finishing. Performing final cleanup of tasks...")
-    tasks_to_cancel = [task for task in asyncio.all_tasks(loop=loop) if task is not asyncio.current_task() and not task.done()]
+    tasks_to_cancel = [
+        task
+        for task in asyncio.all_tasks(loop=loop)
+        if task is not asyncio.current_task() and not task.done()
+    ]
     if not tasks_to_cancel:
         logger.info("No outstanding tasks to cancel.")
         logger.info("Application shutdown sequence complete.")
@@ -207,23 +226,23 @@ async def process_all_names_main_task(shutdown_handler: GracefulShutdownHandler)
     start_time_total = time.time()
     logger.info("Application starting name processing...")
 
-    input_file = FILE_CONFIG['INPUT_FILE']
-    output_file = FILE_CONFIG['OUTPUT_FILE']
+    input_file = FILE_CONFIG["INPUT_FILE"]
+    output_file = FILE_CONFIG["OUTPUT_FILE"]
 
     _ensure_input_csv_or_dummy(input_file)
 
     delay_adapter = make_delay(
-        HTTP_CONFIG['INITIAL_DELAY'], HTTP_CONFIG['MIN_DELAY'], HTTP_CONFIG['MAX_DELAY']
+        HTTP_CONFIG["INITIAL_DELAY"], HTTP_CONFIG["MIN_DELAY"], HTTP_CONFIG["MAX_DELAY"]
     )
     worker_adapter = make_workers(
-        HTTP_CONFIG.get('INITIAL_WORKERS', HTTP_CONFIG['MIN_WORKERS']),
-        HTTP_CONFIG['MIN_WORKERS'],
-        HTTP_CONFIG['MAX_WORKERS'],
+        HTTP_CONFIG.get("INITIAL_WORKERS", HTTP_CONFIG["MIN_WORKERS"]),
+        HTTP_CONFIG["MIN_WORKERS"],
+        HTTP_CONFIG["MAX_WORKERS"],
     )
     batch_size_adapter = make_batch_size(
-        HTTP_CONFIG['BATCH_SIZE'],
-        HTTP_CONFIG.get('MIN_BATCH_SIZE', max(10, HTTP_CONFIG['BATCH_SIZE'] // 4)),
-        HTTP_CONFIG.get('MAX_BATCH_SIZE', HTTP_CONFIG['BATCH_SIZE'] * 2),
+        HTTP_CONFIG["BATCH_SIZE"],
+        HTTP_CONFIG.get("MIN_BATCH_SIZE", max(10, HTTP_CONFIG["BATCH_SIZE"] // 4)),
+        HTTP_CONFIG.get("MAX_BATCH_SIZE", HTTP_CONFIG["BATCH_SIZE"] * 2),
     )
     checkpoint_service = CheckpointService()
 
@@ -232,9 +251,12 @@ async def process_all_names_main_task(shutdown_handler: GracefulShutdownHandler)
     async with create_aiohttp_session() as session:
         name_service = NameService(session)
         batch_service = BatchService(
-            name_service, checkpoint_service,
-            delay_adapter, worker_adapter, batch_size_adapter,
-            shutdown_handler.shutdown_event
+            name_service,
+            checkpoint_service,
+            delay_adapter,
+            worker_adapter,
+            batch_size_adapter,
+            shutdown_handler.shutdown_event,
         )
 
         total_processed_rows = 0
@@ -245,7 +267,7 @@ async def process_all_names_main_task(shutdown_handler: GracefulShutdownHandler)
         _initialize_output_csv_for_run(checkpoint_service, output_file)
 
         try:
-            for chunk_df in pd.read_csv(input_file, chunksize=HTTP_CONFIG['CHUNK_SIZE'], encoding='utf-8'):
+            for chunk_df in pd.read_csv(input_file, chunksize=HTTP_CONFIG["CHUNK_SIZE"], encoding="utf-8"):
                 current_chunk_index += 1
                 total_processed_rows, stop = await _process_one_input_chunk(
                     chunk_df,
