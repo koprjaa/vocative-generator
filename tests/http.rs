@@ -116,7 +116,7 @@ async fn post_retries_and_empty_result() {
     let result = svc.process_single_name("Jan").await;
     assert_eq!(result.vocative, "Jan");
     assert!(!result.success);
-    assert!(result.error_message.is_none());
+    assert!(result.error_message.is_some());
 }
 #[tokio::test]
 async fn concurrent_cookie_pairs_do_not_leak() {

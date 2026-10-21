@@ -168,26 +168,7 @@ pub async fn run(config: Config, service: NameService, shutdown: Arc<AtomicBool>
             "ERROR",
             format!("Input file {} not found. Exiting.", config.input.display()),
         );
-        log(
-            "__main__",
-            "INFO",
-            format!(
-                "Creating dummy input file {} for testing.",
-                config.input.display()
-            ),
-        );
-        let mut w = csv::WriterBuilder::new()
-            .terminator(if cfg!(windows) {
-                csv::Terminator::CRLF
-            } else {
-                csv::Terminator::Any(b'\n')
-            })
-            .from_path(&config.input)?;
-        w.write_record(["ID", "Name"])?;
-        for i in 1..=20 {
-            w.write_record([i.to_string(), format!("First Name Last Name {i}")])?;
-        }
-        w.flush()?;
+        return Err(format!("Input file {} not found", config.input.display()).into());
     }
     let mut cp = Checkpoint::load(&config.input, &config.checkpoint)?;
     if !cp.processed_names.is_empty() {
@@ -227,7 +208,15 @@ pub async fn run(config: Config, service: NameService, shutdown: Arc<AtomicBool>
         config.batch_size.max(4000),
     );
     let mut reader = csv::ReaderBuilder::new().from_path(&config.input)?;
-    let mut headers = reader.headers()?.clone();
+    let mut headers = reader
+        .headers()
+        .map_err(|e| {
+            format!(
+                "Cannot read {} (input must be UTF-8): {e}",
+                config.input.display()
+            )
+        })?
+        .clone();
     if let Some(first) = headers.get(0) {
         if first.starts_with('\u{feff}') {
             let mut h = csv::StringRecord::new();
@@ -248,7 +237,13 @@ pub async fn run(config: Config, service: NameService, shutdown: Arc<AtomicBool>
         let chunk = records
             .by_ref()
             .take(config.chunk_size)
-            .collect::<std::result::Result<Vec<_>, _>>()?;
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|e| {
+                format!(
+                    "Cannot read {} (input must be UTF-8): {e}",
+                    config.input.display()
+                )
+            })?;
         if chunk.is_empty() {
             break;
         }
@@ -387,10 +382,13 @@ pub async fn run(config: Config, service: NameService, shutdown: Arc<AtomicBool>
                     workers.record(r.success);
                     batch_size.record(r.success);
                     let id = name_ids.get(&r.original_name).cloned().unwrap_or_default();
-                    pending.insert(
-                        r.original_name.clone(),
-                        serde_json::json!({"vocative":r.vocative,"id":id}),
-                    );
+                    // A failed lookup must stay out of the cache, or resume would treat it as done.
+                    if r.error_message.is_none() {
+                        pending.insert(
+                            r.original_name.clone(),
+                            serde_json::json!({"vocative":r.vocative,"id":id}),
+                        );
+                    }
                     results.insert(r.original_name.clone(), r);
                 }
                 completed += 1;

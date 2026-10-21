@@ -46,20 +46,27 @@ async fn main() {
         }
     });
     log("__main__", "INFO", "Starting main_wrapper...");
+    let mut failed = false;
     match NameService::new("https://sklonuj.cz") {
         Ok(service) => match run(Config::default(), service, shutdown).await {
             Ok(_) => log("__main__", "INFO", "Main processing task completed."),
-            Err(e) => log(
-                "__main__",
-                "ERROR",
-                format!("Main processing task failed with an exception: {e}"),
-            ),
+            Err(e) => {
+                failed = true;
+                log(
+                    "__main__",
+                    "ERROR",
+                    format!("Main processing task failed with an exception: {e}"),
+                )
+            }
         },
-        Err(e) => log(
-            "__main__",
-            "CRITICAL",
-            format!("Critical error at top level: {e}"),
-        ),
+        Err(e) => {
+            failed = true;
+            log(
+                "__main__",
+                "CRITICAL",
+                format!("Critical error at top level: {e}"),
+            )
+        }
     }
     signal.abort();
     log(
@@ -73,4 +80,7 @@ async fn main() {
         "Application shutdown sequence complete.",
     );
     println!("Application has exited.");
+    if failed {
+        std::process::exit(1);
+    }
 }

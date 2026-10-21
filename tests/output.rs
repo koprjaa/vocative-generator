@@ -283,3 +283,38 @@ async fn shutdown_during_batch_saves_completed_name_and_resume_recovers_all() {
     assert!(rows(&c).iter().all(|r| !r[2].is_empty()));
     assert_eq!(server.received_requests().await.unwrap().len(), 2);
 }
+#[tokio::test]
+async fn failed_lookup_is_reported_and_not_cached() {
+    use wiremock::{
+        matchers::{body_string_contains, method},
+        Mock, MockServer, ResponseTemplate,
+    };
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(body_string_contains("Broken"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("<h1>Nothing</h1>"))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_string(include_str!("fixtures/result.html")),
+        )
+        .mount(&server)
+        .await;
+    let d = tempdir().unwrap();
+    let c = config(d.path());
+    fs::write(&c.input, "ID,Name\n1,Jan Dvořák\n2,Broken\n").unwrap();
+    let svc = NameService::new(&server.uri()).unwrap();
+    run(c.clone(), svc, Arc::new(AtomicBool::new(false)))
+        .await
+        .unwrap();
+    let cp = Checkpoint::load(&c.input, &c.checkpoint).unwrap();
+    assert!(cp.processed_names.contains_key("Jan Dvořák"));
+    assert!(!cp.processed_names.contains_key("Broken"));
+    let out = fs::read_to_string(&c.output).unwrap();
+    assert!(out.contains("No vocative found"));
+}

@@ -253,6 +253,7 @@ impl NameService {
                                         html.chars().take(1000).collect::<String>()
                                     ),
                                 );
+                                return NameResult::error(name, "No vocative found in response");
                             }
                             let rate = {
                                 let mut state = self.backoff.lock().unwrap();
@@ -266,13 +267,10 @@ impl NameService {
                                 "INFO",
                                 format!(
                                     "Processed '{name}'. Vocative: '{}'. Success rate: {rate:.1}%",
-                                    if voc.is_empty() { "(empty)" } else { &voc }
+                                    voc
                                 ),
                             );
-                            return NameResult::from_vocative(
-                                name,
-                                if voc.is_empty() { name } else { &voc },
-                            );
+                            return NameResult::from_vocative(name, &voc);
                         }
                     }
                 }
