@@ -96,3 +96,32 @@ fn corrupt_partial_clear_and_cache_filter() {
     assert!(!path.exists());
     assert_eq!(cp.resume_info(0), Some(0));
 }
+#[cfg(unix)]
+#[test]
+fn unreadable_checkpoint_is_an_error_not_deleted() {
+    use std::os::unix::fs::PermissionsExt;
+    let d = tempdir().unwrap();
+    let input = d.path().join("names.csv");
+    let path = d.path().join("checkpoint.json");
+    fs::write(&input, "Name\nJan\n").unwrap();
+    fs::write(&path, "{}").unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o000)).unwrap();
+    if fs::read(&path).is_ok() {
+        return; // running as root
+    }
+    assert!(Checkpoint::load(&input, &path).is_err());
+    assert!(path.exists());
+}
+#[test]
+fn corrupt_checkpoint_is_moved_aside() {
+    let d = tempdir().unwrap();
+    let input = d.path().join("names.csv");
+    let path = d.path().join("checkpoint.json");
+    fs::write(&input, "Name\nJan\n").unwrap();
+    fs::write(&path, "not json").unwrap();
+    Checkpoint::load(&input, &path).unwrap();
+    assert_eq!(
+        fs::read(d.path().join("checkpoint.corrupt")).unwrap(),
+        b"not json"
+    );
+}

@@ -62,9 +62,8 @@ impl Checkpoint {
         if !fresh.path.exists() {
             return Ok(fresh);
         }
-        match fs::read(&fresh.path)
-            .and_then(|b| serde_json::from_slice::<Self>(&b).map_err(io::Error::other))
-        {
+        let bytes = fs::read(&fresh.path)?;
+        match serde_json::from_slice::<Self>(&bytes) {
             Ok(mut saved)
                 if saved.input_fingerprint.is_some()
                     && saved.input_fingerprint == fresh.input_fingerprint =>
@@ -74,16 +73,17 @@ impl Checkpoint {
                 Ok(saved)
             }
             Ok(_) => {
-                log("CheckpointService","WARNING",format!("Checkpoint was built from a different input file. Starting from the beginning and leaving {} alone.",fresh.path.display()));
+                log("CheckpointService","WARNING",format!("Checkpoint was built from a different input file. Starting from the beginning; {} will be overwritten by the first save.",fresh.path.display()));
                 Ok(fresh)
             }
             Err(_) => {
                 log("CheckpointService", "ERROR", "Error loading checkpoint");
-                fs::remove_file(&fresh.path)?;
+                let aside = fresh.path.with_extension("corrupt");
+                fs::rename(&fresh.path, &aside)?;
                 log(
                     "CheckpointService",
                     "INFO",
-                    "Corrupted checkpoint file removed.",
+                    format!("Corrupted checkpoint moved to {}.", aside.display()),
                 );
                 Ok(fresh)
             }
